@@ -6,7 +6,6 @@ import { useEffect, useRef } from 'react';
 import { getDoc, registrarVista } from '../editor/docs';
 import { efectosDeSalto } from '../editor/extensions';
 import { useApp } from '../store/app';
-import { abrirPantallaProyecto } from '../store/proyecto';
 import { VisorArchivo } from './VisorArchivo';
 
 const EOL_NOMBRE = { lf: 'LF', crlf: 'CRLF', cr: 'CR' } as const;
@@ -14,10 +13,8 @@ const EOL_NOMBRE = { lf: 'LF', crlf: 'CRLF', cr: 'CR' } as const;
 function Pestanas() {
   const tabs = useApp((s) => s.tabs);
   const activeRel = useApp((s) => s.activeRel);
-  const rootFile = useApp((s) => s.rootFile);
   const activar = useApp((s) => s.activar);
   const cerrar = useApp((s) => s.cerrarTab);
-  const activa = tabs.find((t) => t.rel === activeRel);
 
   return (
     <div className="pestanas">
@@ -40,15 +37,6 @@ function Pestanas() {
           </div>
         ))}
       </div>
-      {activa && activa.rel.toLowerCase().endsWith('.tex') && activa.rel !== rootFile && (
-        <button
-          className="boton chico"
-          onClick={() => void abrirPantallaProyecto({ raiz: activa.rel })}
-          title="Proponer este archivo como documento principal (abre la pantalla Proyecto)"
-        >
-          Usar como raíz
-        </button>
-      )}
     </div>
   );
 }

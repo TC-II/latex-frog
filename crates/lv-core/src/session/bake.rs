@@ -262,6 +262,21 @@ impl Session {
                 Ok(Some(sel))
             }
             PartsSel::One => Err(otro(format!("el perfil {perfil:?} es de exportación: se lanza desde Exportar"))),
+            PartsSel::Current | PartsSel::List => {
+                if let Some(mala) = pc.part_list.iter().find(|p| !nombres.contains(p)) {
+                    return Err(otro(format!("el perfil {perfil:?} nombra {mala:?}, que ya no es una parte del proyecto")));
+                }
+                // Sin un capítulo guardado todavía (el proyecto recién abierto), el primero: mejor un PDF que un error.
+                let actual = (pc.parts == PartsSel::Current)
+                    .then(|| d.state.current_part.clone().filter(|p| nombres.contains(p)).or_else(|| nombres.first().cloned()))
+                    .flatten();
+                if pc.parts == PartsSel::Current && actual.is_none() && pc.part_list.is_empty() {
+                    return Err(otro(format!("el perfil {perfil:?} compila el capítulo donde estás, pero el proyecto no tiene capítulos")));
+                }
+                // En el orden del documento, sin repetir.
+                let sel: Vec<String> = nombres.iter().filter(|n| pc.part_list.contains(n) || actual.as_ref() == Some(n)).cloned().collect();
+                Ok(Some(sel))
+            }
         }
     }
 
@@ -308,6 +323,8 @@ impl Session {
             figuras,
             solo_cache: false,
             fragmento: false,
+            omitir: vec![],
+            sustituciones: vec![],
         })?;
         let opciones = Opciones { root: self.root.clone(), engine: cfg.engine.clone(), dir: fcfg.dir.clone(), jobs: fcfg.jobs };
         let huella = if completa { self.huella_actual(&ix, &fcfg) } else { None };

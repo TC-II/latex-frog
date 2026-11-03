@@ -67,6 +67,12 @@ pub struct ProfileView {
     pub draft_images: bool,
     /// El perfil figura en `publish.names`: es lo que se entrega y el interruptor de borrador de la máquina no lo toca.
     pub publica: bool,
+    pub part_list: Vec<String>,
+    pub omit: Vec<String>,
+    pub color: Option<String>,
+    pub vars: indexmap::IndexMap<String, String>,
+    pub output: Option<config::OutputCfg>,
+    pub compile_on: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -107,6 +113,8 @@ pub struct ProjectView {
     pub index_ms: u64,
     /// El PID de otra instancia de la app que tiene abierto este proyecto (`.lv/lock`): acá no se compila ni se cocina.
     pub locked_by: Option<u32>,
+    /// Las piezas del documento que un perfil puede sacar (índice, bibliografía, PDF insertados...).
+    pub piezas: Vec<crate::piezas::PiezaInfo>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -243,6 +251,26 @@ struct Plan {
     fragmento: Option<String>,
 }
 
+/// Copia el `.bbl` más completo de los otros perfiles como `.bbl` del perfil `destino` (la vista previa de un fragmento no corre biber).
+/// El más grande y no el más nuevo: el de un perfil de un solo capítulo sólo trae las obras que cita ese capítulo.
+fn sembrar_bbl(root: &Path, destino: &str) {
+    let Ok(dirs) = std::fs::read_dir(root.join(".lv/build")) else { return };
+    let mejor = dirs
+        .flatten()
+        .filter_map(|e| {
+            let nombre = e.file_name().to_string_lossy().to_string();
+            let bbl = e.path().join(format!("lv-{nombre}.bbl"));
+            let tam = std::fs::metadata(&bbl).ok()?.len();
+            (nombre != destino && !aux::is_suspect(root, &nombre)).then_some((tam, bbl))
+        })
+        .max_by_key(|(t, _)| *t);
+    if let Some((_, bbl)) = mejor {
+        let dir = aux::build_dir(root, destino);
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::copy(bbl, dir.join(format!("lv-{destino}.bbl")));
+    }
+}
+
 fn otro(m: impl Into<String>) -> Error {
     Error::Other(m.into())
 }
@@ -367,6 +395,12 @@ impl Session {
                     hidden: p.hidden,
                     draft_images: p.draft_images,
                     publica: c.publish.as_ref().is_some_and(|pb| pb.names.contains_key(id)),
+                    part_list: p.part_list.clone(),
+                    omit: p.omit.clone(),
+                    color: p.color.clone(),
+                    vars: p.vars.clone(),
+                    output: p.output.clone(),
+                    compile_on: p.compile_on.clone(),
                 })
                 .collect(),
             variables: c
@@ -400,6 +434,7 @@ impl Session {
                 .unwrap_or_default(),
             index_ms: d.index.as_ref().map(|i| i.scan_ms).unwrap_or(0),
             locked_by: self.bloqueado_por,
+            piezas: d.index.as_ref().map(|ix| crate::piezas::detectar(&self.root, ix)).unwrap_or_default(),
         }
     }
 
@@ -527,6 +562,12 @@ impl Session {
             (ix.part_of(rel).map(|i| ix.parts[i].name.clone()), afecta, perfil.map_or(true, |p| p.auto_compile))
         };
         d.index = Some(ix);
+        // El capítulo donde se está trabajando: lo compila un perfil `parts: "current"`. Un archivo que no es de ninguna parte (el
+        // preámbulo) no lo cambia.
+        if part.is_some() && d.state.current_part != part {
+            d.state.current_part = part.clone();
+            let _ = config::write_state(&self.root, &d.state);
+        }
         if parts_changed {
             // La selección puede haber quedado con partes que ya no existen.
             self.recalcular(&mut d);
@@ -558,23 +599,8 @@ impl Session {
             }
             Some(partes.clone())
         } else {
-            match pc.parts {
-            // Todas las partes con la lista completa (no `None`): un `\includeonly` propio de la raíz no lo recorta (S6).
-            PartsSel::All => (!nombres.is_empty()).then(|| nombres.clone()),
-            PartsSel::Selection => {
-                if nombres.is_empty() {
-                    return Err(otro(format!(
-                        "el perfil {perfil:?} compila partes elegidas, pero el proyecto no tiene partes (¿falta `parts.commands` en latexviewer.json?)"
-                    )));
-                }
-                let sel: Vec<String> = nombres.iter().filter(|n| d.state.selection.contains(n)).cloned().collect();
-                if sel.is_empty() {
-                    return Err(otro("elegí al menos una parte para compilar"));
-                }
-                Some(sel)
-            }
-            PartsSel::One => return Err(otro(format!("el perfil {perfil:?} es de exportación: se lanza desde Exportar"))),
-            }
+            // Todas las partes van con la lista completa (no `None`): un `\includeonly` propio de la raíz no lo recorta (S6).
+            Self::includeonly_de(&d, perfil, &pc, &nombres)?
         };
         let mut flags = Vec::new();
         if pc.partial {
@@ -586,7 +612,7 @@ impl Session {
         let vars: Vec<(String, String)> = cfg
             .variables
             .iter()
-            .filter_map(|(n, v)| d.state.variables.get(n).or(v.default.as_ref()).map(|x| (n.clone(), x.clone())))
+            .filter_map(|(n, v)| pc.vars.get(n).or(d.state.variables.get(n)).or(v.default.as_ref()).map(|x| (n.clone(), x.clone())))
             .collect();
         let seed = includeonly.as_ref().map(|sel| {
             (
@@ -603,6 +629,16 @@ impl Session {
             // compartido, las figuras del capítulo (el índice dentro del fragmento no es el del capítulo).
             f.slugs.push((crate::build::FRAGMENTO_REL.to_string(), "frag".to_string()));
         }
+        // Las piezas que el perfil saca: copias de los archivos que las tienen, con su bloque comentado, en `.lv/piezas/<perfil>/`.
+        let mut sustituciones = Vec::new();
+        if !pc.omit.is_empty() {
+            let piezas = crate::piezas::detectar(&self.root, &ix);
+            for (rel, contenido) in crate::piezas::copias(&self.root, &piezas, &pc.omit) {
+                let copia = format!(".lv/piezas/{perfil}/{rel}");
+                crate::build::write_if_changed(&self.root.join(&copia), &contenido)?;
+                sustituciones.push((rel, copia));
+            }
+        }
         let driver = render_driver_spec(&DriverSpec {
             perfil: perfil.to_string(),
             root_rel: rf.clone(),
@@ -615,6 +651,8 @@ impl Session {
             figuras,
             solo_cache: pc.externalize && pc.cache_only,
             fragmento: extra.fragmento.is_some(),
+            omitir: pc.omit.iter().filter_map(|o| crate::piezas::Pieza::de_clave(o)).collect(),
+            sustituciones,
         })?;
         let dirs = ix.include_dirs(&cfg.parts.commands);
         let datos_de_figuras = (pc.externalize && figcache::FigureCfg::de(&cfg).modo != figcache::Modo::Off).then(|| self.datos_de_figuras(&cfg, &ix));
@@ -622,12 +660,30 @@ impl Session {
         Ok(Plan {
             datos_de_figuras,
             fragmento: extra.fragmento.clone(),
-            spec: RunSpec { perfil: perfil.to_string(), root_rel: rf, driver, engine: cfg.engine.clone(), shell_escape: pc.externalize && !pc.cache_only, retry },
+            spec: RunSpec {
+                perfil: perfil.to_string(),
+                root_rel: rf,
+                driver,
+                engine: cfg.engine.clone(),
+                shell_escape: pc.externalize && !pc.cache_only,
+                retry,
+                una_pasada: extra.fragmento.is_some(),
+                formato: None,
+            },
             cache_dir: cfg.figure_dir(),
             clean: pc.clean_before,
             seed,
             dirs,
         })
+    }
+
+    /// La lista de partes que compila un perfil, en el orden del documento (lo mismo que su `\includeonly`; todas si no recorta).
+    pub(crate) fn partes_del_perfil(&self, perfil: &str) -> Result<Vec<String>> {
+        let d = self.lock()?;
+        let cfg = d.config.as_ref().ok_or_else(|| otro("no hay configuración"))?;
+        let pc = cfg.profiles.get(perfil).ok_or_else(|| otro(format!("no existe el perfil {perfil:?}")))?;
+        let nombres = d.index.as_ref().map(|i| i.part_names()).unwrap_or_default();
+        Ok(Self::includeonly_de(&d, perfil, pc, &nombres)?.unwrap_or(nombres))
     }
 
     /// ¿El interruptor de borrador de esta máquina (`State.draft_images`) vale para este perfil? **No** para lo que se entrega: la
@@ -668,6 +724,11 @@ impl Session {
         if let Ok(mut m) = self.motivo.lock() {
             *m = Some(motivo.chars().take(300).collect());
         }
+        // Un perfil de un PDF por capítulo no es un build: es una exportación de sus capítulos con sus opciones (`session/export.rs`).
+        let por_parte = self.lock()?.config.as_ref().and_then(|c| c.profiles.get(&perfil)).and_then(|p| p.output.as_ref()).is_some_and(|o| o.per_part);
+        if por_parte {
+            return self.request_export_de(&perfil);
+        }
         // Si el sello de las figuras cambió, primero se cocinan las del perfil (`session/bake.rs`).
         self.pedir_con_cocina(perfil)
     }
@@ -684,12 +745,56 @@ impl Session {
 
     /// `ctx`: el contexto del historial de un build que se reintenta (el mismo de la primera corrida); `None` para uno nuevo.
     fn lanzar(self: &Arc<Self>, perfil: &str, retry: bool, ctx: Option<historia::Ctx>) -> Result<u64> {
-        let plan = self.plan(perfil, retry)?;
+        let mut plan = self.plan(perfil, retry)?;
         let ctx = ctx.unwrap_or_else(|| Arc::new(Mutex::new(historia::CtxBuild::nuevo(self.tomar_motivo(), self.tomar_listado()))));
+        // Mientras se escribe (lo pidió guardar, dejar de tipear o un cambio de afuera), una sola pasada y sin biber: el PDF sale con la
+        // primera y una referencia nueva se completa en la compilación siguiente. «Compilar» (manual) hace todas las pasadas. Medido en
+        // el libro tras agregar un párrafo: 2 pasadas de 2,1 s.
+        let mientras_escribe = ctx.lock().is_ok_and(|c| c.motivo.starts_with("guardado") || c.motivo.starts_with("afuera"));
+        if mientras_escribe && !retry {
+            plan.spec.una_pasada = true;
+        }
+        self.preambulo_precompilado(perfil, &mut plan);
         // Las figuras que lance este build se verifican contra este instante: su PDF tiene que ser posterior.
         let desde = std::time::SystemTime::now();
         let sink = self.envolver(perfil.to_string(), plan.cache_dir.clone(), retry, desde, ctx.clone());
         self.lanzar_con(plan, perfil, sink, ctx)
+    }
+
+    /// Con pdflatex, el preámbulo del perfil precompilado (`formato.rs`): el formato es el driver del perfil hasta `\begin{document}`, y lo
+    /// que se compila es una línea `\begin{document}` más lo que sigue a esa línea en el archivo que abre el documento (copiado a
+    /// `.lv/build/<perfil>/`). Medido en el libro: una pasada de 2,1 s baja a ~0,6 s. El formato se rehace cuando cambian el driver
+    /// (otro capítulo, otras piezas) o un archivo del preámbulo; si no se puede (otro motor, un paquete que no lo admite), el build va
+    /// como siempre. Las figuras nuevas se cocinan igual que antes: pgf lee el driver completo, que es el `\jobname` del formato.
+    fn preambulo_precompilado(&self, perfil: &str, plan: &mut Plan) {
+        if plan.spec.engine != "pdflatex" || plan.fragmento.is_some() || es_de_servicio(perfil) {
+            return;
+        }
+        let Some(archivos) = self.lock().ok().and_then(|d| d.index.as_ref().map(crate::formato::archivos_del_preambulo)) else { return };
+        // Los archivos con piezas sacadas se leen desde su copia: el driver lo declara con `\declare@file@substitution`.
+        let mut sustituidos = std::collections::HashMap::new();
+        for l in plan.spec.driver.lines() {
+            if let Some(r) = l.strip_prefix("\\declare@file@substitution{") {
+                if let Some((o, c)) = r.trim_end_matches('}').split_once("}{") {
+                    sustituidos.insert(o.to_string(), c.to_string());
+                }
+            }
+        }
+        let raiz_copia = sustituidos.get(&plan.spec.root_rel).cloned();
+        let copia = |a: &str| sustituidos.get(a).cloned().or_else(|| (a == plan.spec.root_rel).then(|| raiz_copia.clone()).flatten()).unwrap_or_else(|| a.to_string());
+        let Some(resto) = crate::formato::cuerpo_del_documento(&self.root, &archivos, copia) else { return };
+        let dir = format!(".lv/build/{perfil}");
+        let rel_resto = format!("{dir}/lv-{perfil}-resto.tex");
+        if crate::build::write_if_changed(&self.root.join(&rel_resto), &resto).is_err() {
+            return;
+        }
+        let huella = crate::formato::huella(&self.root, &plan.spec.driver, &archivos);
+        let pre = format!("lv-{perfil}-pre");
+        if let Some(fmt) = crate::formato::asegurar_con_nombre(&self.root, &dir, &pre, &plan.spec.driver, &huella) {
+            // La huella va en el archivo que se compila: si cambió el preámbulo, latexmk lo ve y vuelve a compilar.
+            plan.spec.driver = format!("% preambulo {huella}\n\\begin{{document}}\n\\input{{{}}}\n", rel_resto.trim_end_matches(".tex"));
+            plan.spec.formato = Some(fmt);
+        }
     }
 
     /// Lanza latexmk con un plan ya armado. Lo que hay que preparar antes (limpiar o sembrar auxiliares, el fragmento) va DENTRO
@@ -739,6 +844,8 @@ impl Session {
                     let rel = crate::build::FRAGMENTO_REL;
                     let contenido = format!("\\ifdefined\\FigurasDe\\FigurasDe{{frag}}\\fi\n{texto}\n");
                     crate::build::write_if_changed(&root.join(rel), &contenido)?;
+                    // Una sola pasada y sin biber: las citas salen de la bibliografía ya resuelta del build más reciente de otro perfil.
+                    sembrar_bbl(root, nombre);
                 }
                 // Sospechoso hasta que el build salga bien: sobrevive a un cierre brusco de la app.
                 aux::mark_suspect(root, nombre)
@@ -751,9 +858,37 @@ impl Session {
     fn envolver(self: &Arc<Self>, perfil: String, cache_dir: String, retry: bool, desde: std::time::SystemTime, ctx: historia::Ctx) -> Sink {
         let me = self.clone();
         Arc::new(move |ev: BuildEvent| match ev {
-            BuildEvent::Finished { .. } => me.al_terminar(ev, &perfil, &cache_dir, retry, desde, &ctx),
+            BuildEvent::Finished { ok, .. } => {
+                me.al_terminar(ev, &perfil, &cache_dir, retry, desde, &ctx);
+                // Con la verificación hecha (una figura rota deja el perfil sospechoso), la copia a la salida del perfil.
+                if ok && !aux::is_suspect(&me.root, &perfil) {
+                    if let Err(e) = me.copiar_a_la_salida(&perfil) {
+                        (me.sink)(BuildEvent::Error { message: e.to_string() });
+                    }
+                }
+            }
             otro => (me.sink)(otro),
         })
+    }
+
+    /// Copia el PDF de un perfil con `output` (de un solo PDF) a su carpeta, con el nombre del patrón. Un perfil sin `output` es sólo
+    /// para ver en la app y no copia nada. El PDF con imágenes en borrador también se copia: es lo que el perfil dice que quiere.
+    fn copiar_a_la_salida(&self, perfil: &str) -> Result<()> {
+        let (out, rf) = {
+            let d = self.lock()?;
+            let out = d.config.as_ref().and_then(|c| c.profiles.get(perfil)).and_then(|p| p.output.clone());
+            (out, d.root_file.clone().unwrap_or_default())
+        };
+        let Some(out) = out.filter(|o| !o.per_part) else { return Ok(()) };
+        export::validar_destino(&out.dir)?;
+        let stem = Path::new(&rf).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "documento".into());
+        let nombre = config::nombre_de_salida(&out.pattern, "1", "", &stem, perfil);
+        let dir = self.root.join(&out.dir);
+        std::fs::create_dir_all(&dir).map_err(|e| Error::Io(format!("{}: {e}", dir.display())))?;
+        let origen = self.root.join(crate::build::pdf_rel(perfil));
+        let bytes = std::fs::read(&origen).map_err(|e| Error::Io(format!("{}: {e}", origen.display())))?;
+        let destino = dir.join(&nombre);
+        fsio::escribir_atomico(&destino, &bytes).map_err(|e| Error::Io(format!("no se pudo copiar el PDF a {}: {e}", destino.display())))
     }
 
     /// Lo que hay que hacer con las figuras después de cualquier build (7 del plan, "Figuras que fallan o se cortan"): se verifican
@@ -935,6 +1070,9 @@ impl Session {
                 PartsSel::All => true,
                 // Un archivo que no es de ninguna parte (el preámbulo) está en todos los perfiles.
                 PartsSel::Selection => parte.as_ref().is_none_or(|n| d.state.selection.contains(n)),
+                PartsSel::Current | PartsSel::List => parte
+                    .as_ref()
+                    .is_none_or(|n| p.part_list.contains(n) || (p.parts == PartsSel::Current && d.state.current_part.as_ref() == Some(n))),
                 PartsSel::One => false,
             };
             if contiene {

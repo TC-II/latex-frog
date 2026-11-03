@@ -154,7 +154,9 @@ export const useProyecto = create<ProyectoState>()((set, get) => {
       if (!config) return;
       const v = await validar(config);
       if (!v?.ok || v.normalizado === null) return;
-      set({ paso: 'confirmar', diff: diffDeLineas(get().textoDisco, v.normalizado), error: null });
+      // Se guarda y listo: mostrar el diff del JSON antes de escribir era un paso que nadie quería ver.
+      set({ validacion: v, diff: diffDeLineas(get().textoDisco, v.normalizado), error: null });
+      await get().confirmarGuardado();
     },
 
     volverAEditar() {

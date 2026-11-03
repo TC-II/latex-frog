@@ -5,7 +5,8 @@
 
 export type Eol = 'lf' | 'crlf' | 'cr';
 
-export type PartsSel = 'selection' | 'all' | 'one';
+/** `current`: el capítulo del último archivo guardado (más los de `partList`); `list`: sólo los de `partList`. */
+export type PartsSel = 'selection' | 'all' | 'one' | 'current' | 'list';
 
 export interface ProfileInfo {
   id: string;
@@ -21,6 +22,36 @@ export interface ProfileInfo {
   draftImages: boolean;
   /** Figura en `publish.names`: es lo que se entrega y el interruptor de borrador de la máquina no lo toca. */
   publica: boolean;
+  partList: string[];
+  /** Piezas que el perfil saca (`PiezaInfo.clave`). */
+  omit: string[];
+  /** `#rrggbb`, o null si el perfil no tiene color propio. */
+  color: string | null;
+  /** Valores de variables propios del perfil (ganan sobre los de la máquina). */
+  vars: Record<string, string>;
+  /** Adónde va el PDF; null: sólo para ver en la app. */
+  output: SalidaDePerfil | null;
+  /** Cuándo compila solo: `save` (por omisión) o `idle` (al dejar de tipear). */
+  compileOn: 'save' | 'idle' | null;
+}
+
+export interface SalidaDePerfil {
+  /** Relativa a la raíz del proyecto; puede salir de ella (`../PDF`). */
+  dir: string;
+  /** `{n}`, `{cap}`, `{nombre}`, `{perfil}`; `:02` completa con ceros. */
+  pattern: string;
+  /** Un PDF por capítulo. */
+  perPart?: boolean;
+}
+
+/** Una pieza del documento que un perfil puede sacar: el índice, la bibliografía, un PDF insertado... */
+export interface PiezaInfo {
+  clave: string;
+  nombre: string;
+  archivo: string;
+  linea: number;
+  /** Respecto de los capítulos: `antes`, `despues`, `entre` o vacío. */
+  lugar: string;
 }
 
 export interface VariableInfo {
@@ -54,9 +85,11 @@ export interface AppStateInfo {
   outsideSave: OutsideSave;
   /** El «Fast [draft]» de Overleaf: las imágenes salen como cajas del tamaño que tendrían, sin incluir el archivo. No vale para lo que se entrega. */
   draftImages: boolean;
+  /** La parte del último archivo guardado: la que compila un perfil `parts: "current"`. */
+  currentPart: string | null;
 }
 
-export type StatePatch = Partial<Omit<AppStateInfo, 'root'>>;
+export type StatePatch = Partial<Omit<AppStateInfo, 'root' | 'currentPart'>>;
 
 export interface PartInfo {
   name: string;
@@ -79,6 +112,7 @@ export interface ProjectInfo {
   indexMs: number;
   /** El PID de otra instancia de la app que tiene este proyecto abierto: esta no compila ni cocina (candado de `.lv/lock`). */
   lockedBy: number | null;
+  piezas: PiezaInfo[];
 }
 
 export interface FileInfo {
@@ -387,6 +421,7 @@ export interface Propuesta {
   raiz: string;
   candidatas: CandidataDeRaiz[];
   partes: string[];
+  piezas: PiezaInfo[];
   partsCommands: string[];
   flags: FlagDetectado[];
   figuras: FigurasDetectadas;

@@ -40,7 +40,7 @@ import {
   setEditListener,
   setSelectionListener,
 } from '../editor/docs';
-import { setFuenteSimbolos, setManejadorDefinicion } from '../editor/extensions';
+import { setFuenteSimbolos, setManejadorDefinicion, setManejadorDobleClic } from '../editor/extensions';
 import { pdfApi } from '../pdf/api';
 import { describir, resolverDefinicion, resolverUsos, tokenEnCursor } from '../nav/definiciones';
 import { fragmentoDelCursor } from '../nav/fragmento';
@@ -101,6 +101,11 @@ export interface BuildState {
   figura: FiguraDeBuild | null;
   /** Cuándo arrancó el build en curso (para el tiempo y el típico de la barra). */
   inicioMs: number | null;
+  /** Del pedido hasta que el PDF nuevo quedó en pantalla (compilar + esperar + cargar el PDF): lo que se percibe. */
+  totalMs?: number | null;
+  /** Cuándo arrancó TeX y cuándo terminó (para partir el total en espera, TeX y carga del PDF). */
+  arrancoMs?: number | null;
+  terminoMs?: number | null;
   /** El build en curso (o el último) se hizo con las imágenes en borrador: el PDF tiene cajas en lugar de imágenes. */
   borrador: boolean;
 }
@@ -187,7 +192,8 @@ export interface ExportEstado {
 }
 
 /** Qué se ve en el visor: el documento o la vista previa de un fragmento (8.2 del plan). */
-export type VistaPdf = 'pdf' | 'fragmento';
+/** Dibujadas al instante, sin TeX (`vista/aproximada.ts`): `aproximada` es el archivo entero; `fragmentoAprox`, el párrafo del cursor. */
+export type VistaPdf = 'pdf' | 'fragmento' | 'aproximada' | 'fragmentoAprox';
 
 export interface FragmentoEstado {
   estado: 'idle' | 'compilando' | 'ok' | 'fail';
@@ -254,6 +260,8 @@ interface AppState {
   busqueda: EstadoBusqueda;
   /** "Seguir al cursor": el PDF acompaña al cursor del editor (6.5 del plan). Apagado por defecto. */
   seguir: boolean;
+  /** Sube con cada tecla y cada movimiento del cursor: la vista aproximada se redibuja con él. */
+  cursorEpoch: number;
   notice: Notice | null;
   dialog: DialogState | null;
 
@@ -311,6 +319,8 @@ interface AppState {
   /** Compila el fragmento del cursor (la selección o el entorno actual) y lo muestra en la pestaña Fragmento. */
   previsualizarFragmento(): Promise<void>;
   mostrarVista(v: VistaPdf): void;
+  /** El visor terminó de cargar el PDF del build: cierra el tiempo total que muestra la barra. */
+  pdfMostrado(): void;
   alternarLayout(): void;
   /** Ctrl+Alt+T: perfiles, variables, exportar, cocinar y limpiar. */
   menuCompilacion(): void;
@@ -425,6 +435,7 @@ export const useApp = create<AppState>()((set, get) => {
   setSelectionListener((rel) => get().alMoverCursor(rel));
   setFuenteSimbolos(() => get().simbolos);
   setManejadorDefinicion(() => void get().irADefinicion());
+  setManejadorDobleClic(() => void get().irAlPdf({ silencioso: true }));
 
   return {
     project: null,
@@ -461,6 +472,7 @@ export const useApp = create<AppState>()((set, get) => {
     histIdx: -1,
     busqueda: BUSQUEDA_INICIAL,
     seguir: false,
+    cursorEpoch: 0,
     notice: null,
     dialog: null,
 
@@ -718,8 +730,12 @@ export const useApp = create<AppState>()((set, get) => {
     // --- auto-compilación -------------------------------------------------------------------------------------------
 
     alEditar(rel) {
+      if (get().vistaPdf === 'aproximada' || get().vistaPdf === 'fragmentoAprox') set((x) => ({ cursorEpoch: x.cursorEpoch + 1 }));
       const p = get().project;
-      if (!p || p.state.autoCompile !== 'idle') return;
+      // Al dejar de tipear lo pide el perfil activo (`compileOn: idle`); el `state.autoCompile` de la máquina sigue valiendo (los tests
+      // lo usan en `manual` para que nada compile solo).
+      const idle = p && p.state.autoCompile !== 'manual' && (perfilActivo(p)?.compileOn === 'idle' || p.state.autoCompile === 'idle');
+      if (!p || !idle) return;
       ultimoEditado = rel;
       if (temporizadorIdle) clearTimeout(temporizadorIdle);
       temporizadorIdle = setTimeout(() => {
@@ -775,7 +791,7 @@ export const useApp = create<AppState>()((set, get) => {
       // Guardar todo y compilar (Ctrl+Enter): compilar con el disco viejo daría un PDF que no es lo que se ve.
       if (opciones?.guardar !== false && !(await get().guardarTodo({ auto: false }))) return;
       const yaCorria = get().build.status === 'running';
-      if (!yaCorria) set((x) => ({ build: { ...x.build, status: 'running', ms: null, code: null, passes: null, pendiente: null, paso: null, figura: null, inicioMs: Date.now() } }));
+      if (!yaCorria) set((x) => ({ build: { ...x.build, status: 'running', ms: null, code: null, passes: null, pendiente: null, paso: null, figura: null, inicioMs: Date.now(), totalMs: null } }));
       try {
         // Si ya hay un build corriendo, el core deja este pedido pendiente (y los pedidos seguidos se coalescen).
         const ack = await getBackend().build(perfil, opciones?.motivo);
@@ -830,6 +846,7 @@ export const useApp = create<AppState>()((set, get) => {
             status: 'running', id: e.id, perfil: e.perfil, ms: null, code: null, cmdline: e.cmdline, passes: null, repaired: e.retry, pendiente: null, errors: null, warnings: null, badboxes: null,
             // El tiempo cuenta desde el pedido (`compilar` ya lo puso: incluye la cocción previa de figuras) y no se reinicia en un reintento.
             paso: null, figura: null, inicioMs: s.build.status === 'running' && s.build.inicioMs !== null ? s.build.inicioMs : Date.now(),
+            arrancoMs: Date.now(), terminoMs: null, totalMs: null,
             borrador: perfilEnBorrador(s.project, e.perfil),
           },
         }));
@@ -847,7 +864,7 @@ export const useApp = create<AppState>()((set, get) => {
           // Sólo se recarga el visor con un build bueno y, si no hubo cambios, sólo cuando todavía no hay PDF.
           const recarga = e.ok && e.pdf && (e.updated || s.pdfRel !== e.pdf);
           return {
-            build: { ...s.build, status, id: e.id, perfil: e.perfil, ms: e.ms, code: e.code, passes: e.passes, repaired: e.repaired, errors: e.errors, warnings: e.warnings, badboxes: e.badboxes },
+            build: { ...s.build, status, id: e.id, perfil: e.perfil, ms: e.ms, code: e.code, passes: e.passes, repaired: e.repaired, errors: e.errors, warnings: e.warnings, badboxes: e.badboxes, terminoMs: Date.now() },
             ...(recarga ? { pdfRel: e.pdf, pdfEpoch: s.pdfEpoch + 1 } : {}),
             // Si falló o se cortó, el visor conserva el último PDF bueno y se lo marca como desactualizado.
             pdfStale: e.ok ? false : s.pdfRel !== null,
@@ -998,6 +1015,10 @@ export const useApp = create<AppState>()((set, get) => {
         set((x) => ({ fragmento: { ...x.fragmento, estado: x.fragmento.epoch > 0 ? 'ok' : 'idle' } }));
         get().avisar(mensajeDe(err), 'error');
       }
+    },
+
+    pdfMostrado() {
+      set((s) => (s.build.status === 'ok' && s.build.inicioMs !== null && !s.build.totalMs ? { build: { ...s.build, totalMs: Date.now() - s.build.inicioMs } } : {}));
     },
 
     mostrarVista(v) {
@@ -1633,6 +1654,8 @@ export const useApp = create<AppState>()((set, get) => {
       const primera = rects.reduce((a, b) => (b.page < a.page || (b.page === a.page && b.y < a.y) ? b : a), rects[0]);
       host.mostrar(primera.page, primera);
       if (resaltar) host.resaltar(primera.page, rects);
+      // Con «Seguir» queda una marca fija en la palabra del cursor: se ve en qué lugar exacto de la página se está escribiendo.
+      if (get().seguir) host.marcar?.(primera.page, rects);
       return true;
     },
 
@@ -1684,9 +1707,11 @@ export const useApp = create<AppState>()((set, get) => {
     setSeguir(valor) {
       set({ seguir: valor });
       if (valor) void get().irAlPdf({ resaltar: false, silencioso: true });
+      else pdfApi.host?.marcar?.(null);
     },
 
     alMoverCursor(rel) {
+      if (get().vistaPdf === 'aproximada' || get().vistaPdf === 'fragmentoAprox') set((x) => ({ cursorEpoch: x.cursorEpoch + 1 }));
       if (!get().seguir || rel !== get().activeRel) return;
       if (temporizadorSeguir) clearTimeout(temporizadorSeguir);
       temporizadorSeguir = setTimeout(() => {

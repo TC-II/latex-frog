@@ -12,13 +12,16 @@
 //! slug (`frag`), así no pisan las del capítulo.
 
 use super::*;
-use crate::config::{nombre_de_exportacion, PERFIL_EXPORT, PERFIL_FRAGMENTO};
+use crate::config::{PERFIL_EXPORT, PERFIL_FRAGMENTO};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 /// Exportar estas partes (vacío: todas).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ExportJob {
     pub partes: Vec<String>,
+    /// El perfil con que se compila cada parte: el de servicio `export`, o uno de un PDF por capítulo (`output.perPart`).
+    pub perfil: String,
+    pub destino: crate::config::ExportCfg,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,9 +79,29 @@ impl Session {
             }
             None => todas,
         };
+        self.encolar_export(ExportJob { partes, perfil: PERFIL_EXPORT.into(), destino: ex })
+    }
+
+    /// Un perfil de un PDF por capítulo: exporta sus capítulos, cada uno compilado con las opciones del perfil, a su carpeta y con su
+    /// patrón de nombre.
+    pub(super) fn request_export_de(self: &Arc<Self>, perfil: &str) -> Result<BuildAck> {
+        self.guardia()?;
+        let out = {
+            let d = self.lock()?;
+            d.config.as_ref().and_then(|c| c.profiles.get(perfil)).and_then(|p| p.output.clone()).ok_or_else(|| otro(format!("el perfil {perfil:?} no tiene salida")))?
+        };
+        validar_destino(&out.dir)?;
+        let partes = self.partes_del_perfil(perfil)?;
+        if partes.is_empty() {
+            return Err(otro("el proyecto no tiene capítulos que compilar por separado"));
+        }
+        self.encolar_export(ExportJob { partes, perfil: perfil.into(), destino: crate::config::ExportCfg { dir: out.dir, pattern: out.pattern } })
+    }
+
+    fn encolar_export(self: &Arc<Self>, job: ExportJob) -> Result<BuildAck> {
         // Un error de configuración se dice acá y no en un hilo: se arma el plan de la primera parte.
-        self.plan_con(PERFIL_EXPORT, false, &PlanExtra { partes: Some(vec![partes[0].clone()]), fragmento: None })?;
-        match self.cola.pedir(Job::Export(ExportJob { partes })) {
+        self.plan_con(&job.perfil, false, &PlanExtra { partes: Some(vec![job.partes[0].clone()]), fragmento: None })?;
+        match self.cola.pedir(Job::Export(job)) {
             Pedido::Correr(t) => match self.ejecutar(&t, false) {
                 Ok(id) => Ok(BuildAck::Started { id }),
                 Err(e) => {
@@ -119,7 +142,19 @@ impl Session {
     // --- correr ---------------------------------------------------------------------------------------------------------------
 
     pub(super) fn lanzar_fragmento(self: &Arc<Self>, f: &FragmentJob) -> Result<u64> {
-        let plan = self.plan_con(PERFIL_FRAGMENTO, false, &PlanExtra { partes: Some(vec![]), fragmento: Some(f.texto.clone()) })?;
+        let mut plan = self.plan_con(PERFIL_FRAGMENTO, false, &PlanExtra { partes: Some(vec![]), fragmento: Some(f.texto.clone()) })?;
+        // Con pdflatex, el preámbulo precompilado (`formato.rs`): se compila sólo `\begin{document}\end{document}` y el fragmento entra
+        // por el hook guardado en el formato. Precompilar (unos segundos, sólo cuando cambia el preámbulo) va sin el candado de la sesión.
+        if plan.spec.engine == "pdflatex" {
+            let archivos = self.lock()?.index.as_ref().map(crate::formato::archivos_del_preambulo);
+            if let Some(archivos) = archivos {
+                let huella = crate::formato::huella(&self.root, &plan.spec.driver, &archivos);
+                if let Some(fmt) = crate::formato::asegurar(&self.root, ".lv/build/fragmento", &plan.spec.driver, &huella) {
+                    plan.spec.driver = crate::formato::CUERPO.to_string();
+                    plan.spec.formato = Some(fmt);
+                }
+            }
+        }
         let desde = std::time::SystemTime::now();
         let ctx: historia::Ctx = Arc::new(Mutex::new(historia::CtxBuild::nuevo("manual".into(), None)));
         let sink = self.envolver(PERFIL_FRAGMENTO.to_string(), plan.cache_dir.clone(), false, desde, ctx.clone());
@@ -127,14 +162,13 @@ impl Session {
     }
 
     pub(super) fn lanzar_export(self: &Arc<Self>, e: &ExportJob) -> Result<u64> {
-        let config = self.lock()?.config.clone().ok_or_else(|| otro("no hay configuración"))?;
-        validar_destino(&config.export_cfg().dir)?;
+        validar_destino(&e.destino.dir)?;
         let id = self.export.id.fetch_add(1, Ordering::SeqCst);
         let cancelado = Arc::new(AtomicBool::new(false));
         *self.export.cancelado.lock().map_err(|_| otro("estado de la exportación envenenado"))? = Some(cancelado.clone());
         let me = self.clone();
-        let partes = e.partes.clone();
-        std::thread::spawn(move || me.correr_export(id, partes, config.export_cfg(), cancelado));
+        let e = e.clone();
+        std::thread::spawn(move || me.correr_export(id, e.partes, &e.perfil, e.destino, cancelado));
         Ok(id)
     }
 
@@ -168,7 +202,7 @@ impl Session {
         rx.recv().map_err(|_| otro("el build de la exportación terminó sin avisar"))
     }
 
-    fn correr_export(self: Arc<Self>, id: u64, partes: Vec<String>, ex: crate::config::ExportCfg, cancelado: Arc<AtomicBool>) {
+    fn correr_export(self: Arc<Self>, id: u64, partes: Vec<String>, perfil: &str, ex: crate::config::ExportCfg, cancelado: Arc<AtomicBool>) {
         let t0 = std::time::Instant::now();
         let total = partes.len() as u32;
         (self.sink)(BuildEvent::ExportStarted { id, total });
@@ -188,14 +222,15 @@ impl Session {
                 }
                 let t_parte = std::time::Instant::now();
                 let extra = PlanExtra { partes: Some(vec![parte.clone()]), fragmento: None };
-                let (ok, num, archivo) = match self.build_de_servicio(PERFIL_EXPORT, &extra) {
+                let (ok, num, archivo) = match self.build_de_servicio(perfil, &extra) {
                     Ok(BuildEvent::Finished { ok: true, pdf: Some(_), .. }) => {
-                        let num = numero_impreso(&self.root, PERFIL_EXPORT, parte)
+                        let num = numero_impreso(&self.root, perfil, parte)
                             .or_else(|| todas.iter().position(|n| n == parte).map(|p| (p + 1).to_string()))
                             .unwrap_or_else(|| (i + 1).to_string());
                         let nombre_parte = parte.rsplit('/').next().unwrap_or(parte);
-                        let archivo = format!("{}/{}", ex.dir.trim_end_matches('/'), nombre_de_exportacion(&ex.pattern, &num, nombre_parte));
-                        let copia = std::fs::copy(self.root.join(crate::build::pdf_rel(PERFIL_EXPORT)), self.root.join(&archivo));
+                        let nombre = crate::config::nombre_de_salida(&ex.pattern, &(i + 1).to_string(), &num, nombre_parte, perfil);
+                        let archivo = format!("{}/{}", ex.dir.trim_end_matches('/'), nombre);
+                        let copia = std::fs::copy(self.root.join(crate::build::pdf_rel(perfil)), self.root.join(&archivo));
                         match copia {
                             Ok(_) => (true, Some(num), Some(archivo)),
                             Err(e) => {
@@ -240,7 +275,7 @@ impl Session {
 }
 
 /// `export.dir` puede salir de la raíz (`../PDF/Capítulos`, como `publish.dir`) pero no ser absoluta ni tener unidad.
-fn validar_destino(dir: &str) -> Result<()> {
+pub(super) fn validar_destino(dir: &str) -> Result<()> {
     if dir.trim().is_empty() || dir.starts_with('/') || dir.contains(':') || dir.contains('\\') {
         return Err(otro(format!("`export.dir` {dir:?} no es una carpeta relativa a la raíz del proyecto")));
     }

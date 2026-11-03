@@ -1,15 +1,13 @@
-// Barra superior (10.1 del plan): proyecto y raíz, perfil activo y partes, Compilar / Cancelar, modo de
-// auto-compilación y el resultado del último build. El menú ⋯ tiene lo que se usa menos: variables, publicar, guardar
-// latexviewer.json y qué hacer cuando se guarda un archivo de una parte que el perfil no incluye.
+// Barra superior: el proyecto, el perfil activo, Compilar / Cancelar y el resultado del último build. Todo lo demás es del perfil y
+// se cambia en la pantalla de perfiles (⚙).
 import { useEffect, useState } from 'react';
-import type { AutoCompileMode, OutsideSave, Tipico } from '../backend';
+import type { PartsSel, Tipico } from '../backend';
 import { perfilActivo, useApp } from '../store/app';
 import { lineaDeBuild, textoDeTipico } from '../store/barra';
 import { abrirPantallaProyecto } from '../store/proyecto';
 import { textoDeProgreso } from '../store/figuras';
 import { resumen } from '../store/problemas';
 import { siguienteTema, textoDelTema, useTema } from '../store/tema';
-import { Menu } from './Menu';
 
 /** Los segundos que lleva el build (desde que se pidió) y, al lado, lo típico de ese perfil según el historial. */
 function Cronometro({ desde, tipico }: { desde: number | null; tipico: Tipico | undefined }) {
@@ -32,7 +30,12 @@ function Cronometro({ desde, tipico }: { desde: number | null; tipico: Tipico | 
 const nombreCorto = (n: string) => n.split('/').pop() ?? n;
 
 /** "Desnormalización", "3 partes" o "todas las partes": lo que compila el perfil activo, en una frase corta. */
-export function resumenDePartes(parts: 'selection' | 'all' | 'one' | undefined, seleccion: string[], total: number): string {
+export function resumenDePartes(parts: PartsSel | undefined, seleccion: string[], total: number, actual: string | null = null, lista: string[] = []): string {
+  if (parts === 'current' || parts === 'list') {
+    const todas = [...(parts === 'current' && actual ? [actual] : []), ...lista.filter((p) => p !== actual)];
+    if (todas.length === 0) return parts === 'current' ? 'el capítulo donde estés' : 'ninguna parte';
+    return todas.length === 1 ? nombreCorto(todas[0]) : `${nombreCorto(todas[0])} y ${todas.length - 1} más`;
+  }
   if (parts === 'selection') {
     if (seleccion.length === 0) return 'ninguna parte';
     if (seleccion.length === 1) return nombreCorto(seleccion[0]);
@@ -50,16 +53,11 @@ export function TopBar() {
   const elegirPerfil = useApp((s) => s.elegirPerfil);
   const compilar = useApp((s) => s.compilar);
   const cancelar = useApp((s) => s.cancelarBuild);
-  const setAutoCompile = useApp((s) => s.setAutoCompile);
-  const setOutsideSave = useApp((s) => s.setOutsideSave);
-  const setDraftImages = useApp((s) => s.setDraftImages);
-  const setVariable = useApp((s) => s.setVariable);
-  const publicar = useApp((s) => s.publicar);
+  const previsualizar = useApp((s) => s.previsualizarFragmento);
   const mostrarPanel = useApp((s) => s.mostrarPanel);
   const figProgreso = useApp((s) => s.figProgreso);
   const exportando = useApp((s) => s.exportando);
   const exportPendiente = useApp((s) => s.exportPendiente);
-  const menuCompilacion = useApp((s) => s.menuCompilacion);
   const mostrarPanelInferior = useApp((s) => s.mostrarPanelInferior);
   const avisar = useApp((s) => s.avisar);
   const tema = useTema((s) => s.tema);
@@ -71,13 +69,12 @@ export function TopBar() {
   const estado = project?.state;
   const activo = perfilActivo(project);
   const visibles = config?.profiles.filter((p) => !p.hidden) ?? [];
-  const partes = resumenDePartes(activo?.parts, estado?.selection ?? [], project?.parts.length ?? 0);
   // Siempre la etiqueta, también durante el build (antes mostraba el id con «…»).
   const etiquetaPerfil = (id: string) => config?.profiles.find((p) => p.id === id)?.label ?? id;
   const tipicos = useApp((s) => s.tipicos);
   // Lo que compila el build en curso (puede no ser el perfil activo: quedó en cola o lo pidió un menú).
   const enCurso = config?.profiles.find((p) => p.id === build.perfil);
-  const partesEnCurso = enCurso ? resumenDePartes(enCurso.parts, estado?.selection ?? [], project?.parts.length ?? 0) : '';
+  const partesEnCurso = enCurso ? resumenDePartes(enCurso.parts, estado?.selection ?? [], project?.parts.length ?? 0, estado?.currentPart ?? null, enCurso.partList) : '';
 
   return (
     <div className="barra-superior">
@@ -95,29 +92,27 @@ export function TopBar() {
           >
             ⚙
           </button>
-          {/* La raíz ya no se elige acá: está en latexviewer.json y se cambia desde la pantalla Proyecto (F8b). */}
-          <button
-            className="boton chico raiz-actual"
-            onClick={() => void abrirPantallaProyecto()}
-            title={rootFile ? `Documento principal: ${rootFile}. Clic para configurar el proyecto (raíz, partes, perfiles, salidas…)` : 'Elegir el documento principal y configurar el proyecto'}
-          >
-            {rootFile ?? 'Elegir el documento…'}
-          </button>
+          {/* La barra sólo elige el perfil y compila: todo lo demás (capítulos, piezas, borrador, si compila al guardar, adónde va el
+              PDF) es del perfil y se cambia en la pantalla de perfiles (⚙). Antes repetía esas opciones y se contradecían. */}
           {config && estado && (
             <>
               <label className="raiz">
                 Perfil
-                <select value={estado.activeProfile ?? ''} onChange={(e) => void elegirPerfil(e.target.value)} title="Lo que compila Ctrl+S y Compilar">
+                <select
+                  className="perfil-select"
+                  value={estado.activeProfile ?? ''}
+                  onChange={(e) => void elegirPerfil(e.target.value)}
+                  title="Lo que compila Ctrl+S y Compilar"
+                  style={activo?.color ? { color: activo.color, borderColor: activo.color } : undefined}
+                >
                   {visibles.map((p) => (
-                    <option key={p.id} value={p.id}>{etiquetaPerfil(p.id)}</option>
+                    <option key={p.id} value={p.id} style={p.color ? { color: p.color } : undefined}>
+                      {p.color ? '● ' : ''}
+                      {etiquetaPerfil(p.id)}
+                    </option>
                   ))}
                 </select>
               </label>
-              {partes && (
-                <button className="boton chico partes-resumen" onClick={() => mostrarPanel('partes')} title="Ver y elegir las partes">
-                  {partes}
-                </button>
-              )}
               {ocupado ? (
                 <button className="boton peligro" onClick={() => void cancelar()}>■ Cancelar</button>
               ) : (
@@ -125,61 +120,16 @@ export function TopBar() {
                   ▶ Compilar
                 </button>
               )}
+              {/* Una acción del programa, no del perfil: compila sólo lo que está bajo el cursor (la figura, la ecuación, el párrafo) o lo
+                  seleccionado, y lo muestra en la pestaña Fragmento del visor. */}
               <button
-                className={`boton chico${estado.draftImages ? ' activo' : ''}`}
-                onClick={() => void setDraftImages(!estado.draftImages)}
-                title={
-                  estado.draftImages
-                    ? 'Imágenes en borrador: se dibujan como cajas del tamaño que tendrían, sin procesarlas (más rápido). No vale para lo que se publica ni se exporta. Clic para volver a las completas.'
-                    : 'Imágenes completas. Clic para compilar con las imágenes en borrador (cajas del tamaño que tendrían, sin procesarlas).'
-                }
+                className="boton"
+                onClick={() => void previsualizar()}
+                disabled={!rootFile}
+                title="Compilar sólo lo que está bajo el cursor (o lo seleccionado) y verlo en la pestaña Fragmento (Ctrl+Alt+F)"
               >
-                🖼 {estado.draftImages ? 'Borrador' : 'Imágenes'}
+                Vista previa
               </button>
-              <button className="boton chico" onClick={() => menuCompilacion()} title="Menú de compilación: perfiles, variables, exportar, cocinar, limpiar (Ctrl+Alt+T)">
-                ☰
-              </button>
-              <label className="raiz" title="Cuándo se compila solo">
-                Auto
-                <select value={estado.autoCompile} onChange={(e) => void setAutoCompile(e.target.value as AutoCompileMode)}>
-                  <option value="save">al guardar</option>
-                  <option value="idle">al dejar de tipear</option>
-                  <option value="manual">manual</option>
-                </select>
-              </label>
-              <Menu etiqueta="⋯" titulo="Más opciones">
-                {config.variables.length > 0 && (
-                  <div className="menu-grupo">
-                    <div className="menu-titulo">Variables</div>
-                    {config.variables.map((v) => (
-                      <label key={v.name} className="menu-fila">
-                        <span>{v.label}</span>
-                        <select value={estado.variables[v.name] ?? v.default ?? ''} onChange={(e) => void setVariable(v.name, e.target.value)}>
-                          {v.choices.map((c) => (
-                            <option key={c} value={c}>{c}</option>
-                          ))}
-                        </select>
-                      </label>
-                    ))}
-                  </div>
-                )}
-                <div className="menu-grupo">
-                  <div className="menu-titulo">Si guardo un archivo de otra parte</div>
-                  <label className="menu-fila">
-                    <select value={estado.outsideSave} onChange={(e) => void setOutsideSave(e.target.value as OutsideSave)}>
-                      <option value="warn">avisar</option>
-                      <option value="switch">cambiar la selección y compilar</option>
-                      <option value="build">compilar igual</option>
-                    </select>
-                  </label>
-                </div>
-                <button className="menu-item" data-cierra onClick={() => void publicar()} disabled={!config.publishDir || corriendo} title={config.publishDir ? `Copia el PDF a ${config.publishDir}` : 'El proyecto no define publish.dir'}>
-                  Publicar el PDF del último build
-                </button>
-                <button className="menu-item" data-cierra onClick={() => void abrirPantallaProyecto()}>
-                  Configurar el proyecto…
-                </button>
-              </Menu>
             </>
           )}
           {(build.status === 'ok' || build.status === 'fail') && resumen(build.errors ?? 0, build.warnings ?? 0, 0) && (
@@ -212,6 +162,15 @@ export function TopBar() {
             {build.status === 'ok' && (
               <>
                 ✔ {((build.ms ?? 0) / 1000).toFixed(1)} s{build.passes ? ` · ${build.passes} pasada${build.passes === 1 ? '' : 's'}` : ''}
+                {build.totalMs ? (
+                  <span title="Desde que se pidió la compilación hasta que el PDF nuevo quedó en pantalla (incluye guardar, esperar y cargar el PDF)">
+                    {' '}
+                    · {(build.totalMs / 1000).toFixed(1)} s en total
+                    {build.arrancoMs && build.terminoMs && build.inicioMs
+                      ? ` (espera ${((build.arrancoMs - build.inicioMs) / 1000).toFixed(1)} · TeX ${((build.terminoMs - build.arrancoMs) / 1000).toFixed(1)} · PDF ${((build.inicioMs + build.totalMs - build.terminoMs) / 1000).toFixed(1)})`
+                      : ''}
+                  </span>
+                ) : null}
                 {build.repaired && ' · reparado'}
                 {build.borrador && <span className="borrador" title="El PDF tiene cajas del tamaño de cada imagen en lugar de las imágenes"> · imágenes en borrador</span>}
               </>

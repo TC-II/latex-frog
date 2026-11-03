@@ -7,3 +7,13 @@ exclude = ["spikes/s2-synctex", "spikes/s3-pdfjs/src-tauri"]
 
 [profile.release]
 debug = false
+
+# `tauri dev` compila en el perfil dev. Sin optimizar, el core sumaba ~7 s a cada build del libro (md5 de las figuras, índice del
+# proyecto, piezas): medido con el ejemplo `build` tras agregar un párrafo, 10,9 s en debug contra 3,4 s en release con el mismo
+# TeX de 2,8 s. El core y sus dependencias van optimizados también en desarrollo; la app (src-tauri) sigue en debug para
+# recompilar rápido.
+[profile.dev.package.lv-core]
+opt-level = 3
+
+[profile.dev.package."*"]
+opt-level = 2

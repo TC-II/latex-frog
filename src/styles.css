@@ -118,7 +118,9 @@ button, input, select { font: inherit; color: inherit; }
 .icono-boton:disabled { opacity: 0.4; cursor: default; }
 
 /* asas de los paneles */
-.asa { width: 4px; background: var(--borde); transition: background 0.1s; }
+/* 6 px y el cursor de redimensionar: con 4 px casi no se podía agarrar la barra que ensancha el panel izquierdo. */
+.asa { width: 6px; background: var(--borde); transition: background 0.1s; cursor: col-resize; }
+.asa.horizontal { cursor: row-resize; }
 .asa.horizontal { width: auto; height: 4px; }
 .asa:hover, .asa[data-resize-handle-active] { background: var(--acento); }
 /* Los botones de salto cuelgan de la barra del medio: ella queda de 4 px y ellos la desbordan, centrados, por encima de los paneles. */
@@ -202,9 +204,11 @@ button, input, select { font: inherit; color: inherit; }
 .dialogo .mensaje { margin: 0 0 6px; font-size: 14px; font-weight: 600; }
 .dialogo .detalle { margin: 0 0 10px; color: var(--texto-suave); }
 .dialogo .botones { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 14px; max-height: 50vh; overflow: auto; }
-.aviso { position: fixed; right: 14px; bottom: 14px; z-index: 40; display: flex; align-items: center; gap: 10px; max-width: 520px; padding: 9px 12px; border-radius: 6px; background: var(--panel); border: 1px solid var(--borde); border-left: 4px solid var(--acento); box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25); }
-.aviso.error { border-left-color: var(--peligro); }
-.aviso span { flex: 1; }
+/* Sin `.hallazgo`: los hallazgos de nivel aviso también llevan la clase `aviso` y quedaban flotando
+   abajo a la derecha, encima del botón Guardar de la pantalla Proyecto y sin forma de cerrarlos. */
+.aviso:not(.hallazgo) { position: fixed; right: 14px; bottom: 14px; z-index: 40; display: flex; align-items: center; gap: 10px; max-width: 520px; padding: 9px 12px; border-radius: 6px; background: var(--panel); border: 1px solid var(--borde); border-left: 4px solid var(--acento); box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25); }
+.aviso.error:not(.hallazgo) { border-left-color: var(--peligro); }
+.aviso:not(.hallazgo) span { flex: 1; }
 
 /* barra superior: menú y resumen de partes */
 .barra-superior { flex-wrap: wrap; row-gap: 4px; }
@@ -226,7 +230,9 @@ button, input, select { font: inherit; color: inherit; }
 .menu-item:disabled { opacity: 0.45; cursor: default; }
 
 /* panel izquierdo con pestañas */
-.sidebar { height: 100%; display: flex; flex-direction: column; background: var(--panel); }
+/* `lv-sidebar` y no `sidebar`: el CSS del visor de PDF.js define `.sidebar` con `width: var(--sidebar-width)` (239 px) y el panel no
+   seguía a la barra al ensancharlo. */
+.lv-sidebar { height: 100%; width: 100%; display: flex; flex-direction: column; background: var(--panel); }
 .sidebar-pestanas { display: flex; border-bottom: 1px solid var(--borde); }
 .sidebar-pestanas button { flex: 1; background: none; border: none; padding: 5px 8px; cursor: pointer; color: var(--texto-suave); border-bottom: 2px solid transparent; }
 .sidebar-pestanas button:hover { background: var(--hover); }
@@ -318,6 +324,46 @@ button, input, select { font: inherit; color: inherit; }
 .proy-perfil-cab input { flex: 1; font-weight: 600; }
 .proy-perfil-datos { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; }
 .proy-check { display: flex; align-items: center; gap: 4px; }
+/* Pantalla de perfiles (PerfilesEditor) */
+.perfiles { display: flex; flex-direction: column; gap: 10px; }
+.perfiles-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.perfiles-motor { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--texto-suave); }
+.perfiles-motor select { color: var(--texto); }
+.perfil-chip { display: flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px; border: 1.5px solid var(--borde); background: transparent; color: var(--texto); cursor: pointer; font: inherit; }
+.perfil-chip.elegido { border-width: 2px; }
+.perfil-punto { width: 10px; height: 10px; border-radius: 50%; display: inline-block; border: none; padding: 0; flex: none; }
+.perfil-punto.grande { width: 16px; height: 16px; cursor: pointer; }
+.perfil-punto.elegido { outline: 2px solid var(--texto); outline-offset: 2px; }
+.perfiles-grilla { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.perfiles-grilla > div { display: flex; flex-direction: column; gap: 10px; }
+.perfiles-tarjeta { border: 1px solid var(--borde); border-radius: 10px; padding: 10px 12px; }
+.perfiles-fila { display: flex; align-items: center; gap: 6px; }
+.perfiles-fila input { flex: 1; min-width: 0; }
+.perfiles-nombre { font-weight: 600; }
+.perfiles-etiqueta { font-size: 12px; color: var(--texto-suave); margin: 8px 0 4px; }
+.perfiles-tarjeta > .perfiles-etiqueta:first-child { margin-top: 0; }
+.perfiles-pieza { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+.perfiles-pieza.capitulo { padding-left: 22px; }
+.perfiles-pieza.gris { color: var(--texto-suave); }
+.perfiles-ahora { font-size: 11px; }
+.perfiles-campo { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--texto-suave); margin: 6px 0; }
+.perfiles-campo select, .perfiles-campo input { color: var(--texto); }
+.perfiles-ayuda { font-size: 11px; color: var(--texto-suave); }
+.perfiles-gris { opacity: 0.45; pointer-events: none; }
+.perfiles-archivo { font-family: var(--fuente-mono); font-size: 12px; padding: 1px 0; }
+.perfiles-hojas { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.perfiles-hoja { font-size: 11px; border: 1px solid var(--borde); border-top: 3px solid; border-radius: 4px; padding: 6px; width: 90px; min-height: 52px; }
+.proy-perfil { border-width: 2px; }
+.proy-resumen { margin: 0 0 10px; }
+.proy-detalles { margin-top: 14px; }
+.proy-perfil-tecnico { font-size: 12px; margin-top: 4px; }
+.proy-perfil-tecnico > summary { cursor: pointer; color: var(--texto-suave); }
+.proy-detalles > summary { cursor: pointer; color: var(--texto-suave); padding: 6px 0; }
+.proy-colores { display: flex; gap: 6px; margin: 6px 0 2px; }
+.proy-color { width: 16px; height: 16px; border-radius: 50%; border: none; padding: 0; cursor: pointer; }
+.proy-color.elegido { outline: 2px solid var(--texto); outline-offset: 2px; }
+.proy-perfil-lista { display: flex; flex-wrap: wrap; gap: 2px 14px; font-size: 12px; margin: 6px 0; }
+.proy-perfil-lista .proy-ayuda { flex-basis: 100%; margin: 0; }
 .proy-variable { display: flex; align-items: center; gap: 8px; margin: 4px 0; flex-wrap: wrap; }
 .proy-variable input { flex: 1; min-width: 140px; }
 .proy-sugerida { border-top: 1px dashed var(--borde); margin-top: 6px; padding-top: 4px; }
@@ -365,6 +411,21 @@ button, input, select { font: inherit; color: inherit; }
 
 /* SyncTeX: resaltado de lo que se salta en el PDF */
 .lv-resaltados { position: absolute; inset: 0; pointer-events: none; z-index: 6; }
+/* Pestaña «Al instante»: una hoja blanca con letra de libro, para que se parezca a la página aunque no lo sea. */
+.aprox { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; background: var(--fondo); }
+.aprox-hoja { background: #fff; color: #111; margin: 16px; padding: 28px 36px; font-family: 'Latin Modern Roman', 'CMU Serif', Georgia, 'Times New Roman', serif; font-size: 16px; line-height: 1.5; text-align: justify; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3); }
+.aprox-hoja h2, .aprox-hoja h3, .aprox-hoja h4 { font-family: inherit; text-align: left; }
+.aprox-env { border-left: 4px solid #999; background: #f2f2f2; padding: 8px 12px; margin: 8px 0; }
+.aprox-env::before { content: attr(data-env); display: block; font-size: 11px; color: #888; font-family: system-ui, sans-serif; }
+.aprox-opaco { border: 1px dashed #999; color: #777; padding: 18px; text-align: center; margin: 8px 0; font-family: system-ui, sans-serif; font-size: 12px; }
+.aprox-cita, .aprox-ref { color: #1d6fb8; }
+.aprox-caption { text-align: center; font-size: 14px; }
+.aprox-vacio { color: #999; }
+.aprox-bloque { margin: 0 0 10px; padding: 2px 6px; border-left: 3px solid transparent; }
+.aprox-bloque.actual { border-left-color: #378ADD; background: rgba(55, 138, 221, 0.06); }
+.aprox-pie { font-size: 11px; color: var(--texto-suave); padding: 0 16px 12px; }
+/* La marca fija de «Seguir»: la palabra del cursor, subrayada y sombreada, sin desvanecerse. */
+.lv-marca { position: absolute; background: rgba(55, 138, 221, 0.22); border-bottom: 2px solid rgba(55, 138, 221, 0.9); border-radius: 2px; }
 .lv-resaltado { position: absolute; background: rgba(255, 200, 0, 0.5); border-radius: 2px; box-shadow: 0 0 0 1px rgba(255, 170, 0, 0.8); animation: lv-desvanecer 1500ms ease-out forwards; }
 @keyframes lv-desvanecer { 0%, 55% { opacity: 1; } 100% { opacity: 0; } }
 

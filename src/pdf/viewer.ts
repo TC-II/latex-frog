@@ -420,6 +420,23 @@ export class PdfViewerHost implements PdfApi {
     setTimeout(() => capa.remove(), ms + 100);
   }
 
+  /** La marca fija de «Seguir»: dónde está el cursor del editor en el PDF. No se desvanece; la siguiente la reemplaza. `null` la saca. */
+  marcar(pagina: number | null, rects: Rect[] = []): void {
+    this.area.querySelectorAll('.lv-cursor-pdf').forEach((e) => e.remove());
+    if (pagina === null) return;
+    const v = this.vistaDePagina(pagina);
+    if (!v) return;
+    const capa = document.createElement('div');
+    capa.className = 'lv-resaltados lv-cursor-pdf';
+    for (const r of rects.filter((x) => x.page === pagina)) {
+      const el = document.createElement('div');
+      el.className = 'lv-marca';
+      Object.assign(el.style, { left: `${r.x * v.escala}px`, top: `${r.y * v.escala}px`, width: `${Math.max(r.w, 2) * v.escala}px`, height: `${r.h * v.escala}px` });
+      capa.appendChild(el);
+    }
+    v.pv.div.appendChild(capa);
+  }
+
   esVisible(pagina: number, rect: Rect): boolean {
     const v = this.vistaDePagina(pagina);
     const cont = this.actual?.cont;

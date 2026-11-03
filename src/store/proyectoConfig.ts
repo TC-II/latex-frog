@@ -7,11 +7,19 @@ export interface PerfilJson {
   partial?: boolean;
   externalize?: boolean;
   cacheOnly?: boolean;
-  parts?: 'selection' | 'all' | 'one';
+  parts?: 'selection' | 'all' | 'one' | 'current' | 'list';
   cleanBefore?: boolean;
   autoCompile?: boolean;
   hidden?: boolean;
   draftImages?: boolean;
+  /** Partes fijas: todas las de `list`, o las que se suman a la actual en `current`. */
+  partList?: string[];
+  /** Piezas del documento que el perfil saca (`toc`, `bibliography`, `index`, `pdf:<archivo>`). */
+  omit?: string[];
+  color?: string;
+  vars?: Record<string, string>;
+  output?: { dir: string; pattern: string; perPart?: boolean };
+  compileOn?: 'save' | 'idle';
 }
 
 export interface VariableJson {
@@ -126,6 +134,11 @@ export function fijarPerfil(c: ConfigJson, id: string, parche: PerfilJson): Conf
   for (const k of ['partial', 'externalize', 'cacheOnly', 'cleanBefore', 'hidden', 'draftImages'] as const) if (nuevo[k] === false) delete nuevo[k];
   if (nuevo.autoCompile === true) delete nuevo.autoCompile;
   if (nuevo.parts === 'all') delete nuevo.parts;
+  for (const k of ['partList', 'omit'] as const) if (nuevo[k]?.length === 0) delete nuevo[k];
+  if (!nuevo.color) delete nuevo.color;
+  if (!nuevo.output) delete nuevo.output;
+  if (!nuevo.compileOn) delete nuevo.compileOn;
+  if (nuevo.vars && Object.keys(nuevo.vars).length === 0) delete nuevo.vars;
   sale.profiles = { ...(sale.profiles ?? {}), [id]: nuevo };
   return sale;
 }

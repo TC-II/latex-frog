@@ -95,8 +95,9 @@ export default function App() {
       <TopBar />
       <PanelGroup direction="vertical" autoSaveId="lv-vertical" className="cuerpo">
         <Panel defaultSize={76} minSize={25}>
-          <PanelGroup direction="horizontal" autoSaveId="lv-horizontal">
-            <Panel defaultSize={17} minSize={8} maxSize={40}>
+          {/* Otro autoSaveId para que el panel izquierdo arranque más ancho (17 % no dejaba leer los nombres) y no el guardado viejo. */}
+          <PanelGroup direction="horizontal" autoSaveId="lv-horizontal-2">
+            <Panel defaultSize={22} minSize={10} maxSize={60}>
               <Sidebar />
             </Panel>
             <PanelResizeHandle className="asa" />

@@ -9,6 +9,7 @@ import { getBackend } from '../backend';
 import { useApp } from '../store/app';
 import { pdfActual, PdfViewerHost, type PdfEstado } from './viewer';
 import { pdfApi } from './api';
+import { VistaCapitulo, VistaFragmentoAprox } from './VistaAproximada';
 
 const VACIO: PdfEstado = { pagina: 0, paginas: 0, escala: 1, modo: 'ancho' };
 
@@ -63,6 +64,7 @@ export function PdfPane() {
       try {
         const bytes = await getBackend().readPdf(pdfRel);
         if (vigente) await hostRef.current?.cargar(bytes, `${pdfRel}#${pdfEpoch}`);
+        if (vigente) useApp.getState().pdfMostrado();
       } catch (e) {
         avisar(`No se pudo mostrar el PDF: ${e instanceof Error ? e.message : e}`, 'error');
       } finally {
@@ -92,6 +94,7 @@ export function PdfPane() {
   }, [fragmento.pdfRel, fragmento.epoch, avisar]);
 
   const enFragmento = vista === 'fragmento';
+  const enAproximada = vista === 'aproximada' || vista === 'fragmentoAprox';
   const estado = enFragmento ? estadoFrag : estadoDoc;
   useEffect(() => setPaginaTexto(estado.pagina ? String(estado.pagina) : ''), [estado.pagina]);
 
@@ -130,17 +133,37 @@ export function PdfPane() {
   const hayFragmento = fragmento.estado !== 'idle' || fragmento.epoch > 0;
   return (
     <div className="pdf-panel">
-      {hayFragmento && (
-        <div className="pdf-pestanas" role="tablist">
-          <button role="tab" aria-selected={!enFragmento} className={`pdf-pestana${enFragmento ? '' : ' activa'}`} onClick={() => mostrarVista('pdf')}>
-            Documento
-          </button>
+      <div className="pdf-pestanas" role="tablist">
+        <button role="tab" aria-selected={vista === 'pdf'} className={`pdf-pestana${vista === 'pdf' ? ' activa' : ''}`} onClick={() => mostrarVista('pdf')}>
+          Documento
+        </button>
+        <button
+          role="tab"
+          aria-selected={vista === 'aproximada'}
+          className={`pdf-pestana${vista === 'aproximada' ? ' activa' : ''}`}
+          onClick={() => mostrarVista('aproximada')}
+          title="El archivo entero, dibujado al instante y sin TeX (aproximado, sin páginas): sigue al cursor"
+        >
+          Al instante
+        </button>
+        <button
+          role="tab"
+          aria-selected={vista === 'fragmentoAprox'}
+          className={`pdf-pestana${vista === 'fragmentoAprox' ? ' activa' : ''}`}
+          onClick={() => mostrarVista('fragmentoAprox')}
+          title="Sólo el párrafo o la fórmula del cursor, dibujado al instante y sin TeX (aproximado)"
+        >
+          Fragmento aprox
+        </button>
+        {hayFragmento && (
           <button role="tab" aria-selected={enFragmento} className={`pdf-pestana${enFragmento ? ' activa' : ''}`} onClick={() => mostrarVista('fragmento')} title="Vista previa del fragmento (Ctrl+Alt+F)">
             Fragmento{fragmento.estado === 'compilando' ? ' …' : fragmento.estado === 'fail' ? ' ✘' : ''}
           </button>
-        </div>
-      )}
-      <div className="pdf-barra">
+        )}
+      </div>
+      {vista === 'aproximada' && <VistaCapitulo />}
+      {vista === 'fragmentoAprox' && <VistaFragmentoAprox />}
+      <div className="pdf-barra" style={enAproximada ? { display: 'none' } : undefined}>
         <button className="icono-boton" disabled={!hayPdf} onClick={() => h?.anterior()} title="Página anterior">◀</button>
         <input
           className="pagina"
@@ -172,7 +195,7 @@ export function PdfPane() {
       <div
         className={`pdf-area${stale ? ' desactualizado' : ''}`}
         ref={areaRef}
-        style={enFragmento ? { display: 'none' } : undefined}
+        style={vista !== 'pdf' ? { display: 'none' } : undefined}
         tabIndex={0}
         onKeyDown={teclas}
         // Doble clic (o Ctrl+clic) en el PDF: al código (6.3 del plan).

@@ -5,25 +5,22 @@ import type { FlagDetectado, UsoDeFlag } from '../backend';
 import { diffCompacto, resumenDeDiff } from '../store/diff';
 import { duracion } from '../store/historial';
 import { useProyecto } from '../store/proyecto';
+import { PerfilesEditor } from './PerfilesEditor';
 import {
   aTexto,
   comandosDeParte,
   fijarComandosDeParte,
   fijarFiguras,
   fijarFlag,
-  fijarPerfil,
   fijarSalidas,
   fijarVariable,
   figurasDe,
-  ID_DE_PERFIL,
   NOMBRE_DE_MACRO,
   nombreDeExportacion,
-  quitarPerfil,
   quitarVariable,
   salidasDe,
   usoDeFlag,
   type ConfigJson,
-  type PerfilJson,
 } from '../store/proyectoConfig';
 import { ICONO_DE_NIVEL } from '../store/historial';
 
@@ -65,54 +62,6 @@ function Flag({ f, config, onUso }: { f: FlagDetectado; config: ConfigJson; onUs
         </select>
       </div>
       <p className="proy-ayuda">{f.frase}</p>
-    </div>
-  );
-}
-
-function TarjetaDePerfil({ id, perfil, config }: { id: string; perfil: PerfilJson; config: ConfigJson }) {
-  const propuesta = useProyecto((s) => s.propuesta);
-  const editar = useProyecto((s) => s.editar);
-  const detectado = propuesta?.perfiles.find((p) => p.id === id);
-  const cambiar = (parche: PerfilJson) => editar((c) => fijarPerfil(c, id, parche));
-  const sino = (clave: 'partial' | 'externalize' | 'cacheOnly' | 'cleanBefore' | 'draftImages', texto: string, ayuda: string) => (
-    <label className="proy-check" title={ayuda}>
-      <input type="checkbox" checked={perfil[clave] === true} onChange={(e) => cambiar({ [clave]: e.target.checked })} />
-      {texto}
-    </label>
-  );
-  const publicaDe = detectado?.publica;
-  return (
-    <div className="proy-perfil">
-      <div className="proy-perfil-cab">
-        <input value={perfil.label ?? id} onChange={(e) => cambiar({ label: e.target.value })} aria-label={`Nombre del perfil ${id}`} />
-        <code>{id}</code>
-        <button className="boton chico peligro" onClick={() => editar((c) => quitarPerfil(c, id))} title="Quitar este perfil" disabled={Object.keys(config.profiles ?? {}).length <= 1}>
-          ✕
-        </button>
-      </div>
-      {detectado && <p className="proy-ayuda">{detectado.uso}</p>}
-      <div className="proy-perfil-datos">
-        <label className="proy-check">
-          Partes
-          <select value={perfil.parts ?? 'all'} onChange={(e) => cambiar({ parts: e.target.value as PerfilJson['parts'] })}>
-            <option value="selection">las que elegís</option>
-            <option value="all">todas</option>
-          </select>
-        </label>
-        {sino('partial', 'reducida', 'Define las macros de compilación reducida (sin portada ni índices)')}
-        {sino('externalize', 'figuras con cache', 'Externaliza las figuras de TikZ y usa el cache')}
-        {sino('cacheOnly', 'sólo lee el cache', 'No cocina figuras adentro: la app las cocina antes. No publica.')}
-        {sino('cleanBefore', 'desde cero', 'Borra los auxiliares antes de compilar')}
-        {sino('draftImages', 'imágenes en borrador', 'Las imágenes salen como cajas del tamaño que tendrían, sin procesarlas (como el «Fast [draft]» de Overleaf). Un perfil así no se publica.')}
-        <label className="proy-check" title="Si puede ser el perfil que compila al guardar">
-          <input type="checkbox" checked={perfil.autoCompile !== false} onChange={(e) => cambiar({ autoCompile: e.target.checked })} />
-          compila al guardar
-        </label>
-      </div>
-      <p className="proy-ayuda">
-        {detectado?.tipico ? `Tarda unos ${duracion(detectado.tipico.ms)} en esta máquina (${detectado.tipico.n} builds). ` : 'Todavía no hay tiempos de este perfil. '}
-        {publicaDe ? `Publica «${publicaDe}».` : 'No publica.'}
-      </p>
     </div>
   );
 }
@@ -167,7 +116,6 @@ function Probar() {
 
 export function ProyectoPantalla() {
   const s = useProyecto();
-  const [perfilNuevo, setPerfilNuevo] = useState('');
   const [varNueva, setVarNueva] = useState('');
   const [otras, setOtras] = useState(false);
   const config = s.config;
@@ -208,7 +156,7 @@ export function ProyectoPantalla() {
       <div className="proy-cabecera">
         <h2>Proyecto{p ? ` · ${p.raiz}` : ''}</h2>
         <span className="proy-suave">
-          {s.alAbrir ? 'Este proyecto todavía no tiene latexviewer.json: esto es lo que la app detectó. Revisalo y guardalo.' : 'La configuración de este proyecto (latexviewer.json).'}
+          {s.alAbrir ? 'Primera vez con este proyecto: revisá las formas de compilarlo y guardá.' : 'Las formas de compilar este proyecto.'}
         </span>
         <button className="boton chico" onClick={() => s.cerrar()} title="Cerrar sin guardar (Esc)">
           ✕ Cerrar
@@ -220,6 +168,11 @@ export function ProyectoPantalla() {
 
       {config && p && s.paso === 'editar' && (
         <div className="proy-cuerpo">
+          {/* La pantalla de perfiles es lo único que hace falta tocar. Lo que la app detecta sola queda cerrado abajo. */}
+          <PerfilesEditor config={config} />
+
+          <details className="proy-detalles">
+            <summary>Configuración técnica (la detecta la app: documento principal, capítulos, macros, figuras, variables)</summary>
           {p.avisos.map((a) => (
             <div key={a} className="hallazgo aviso">
               <span className="icono">{ICONO_DE_NIVEL.aviso}</span> {a}
@@ -307,27 +260,6 @@ export function ProyectoPantalla() {
                 )}
               </div>
             )}
-          </Seccion>
-
-          <Seccion titulo="Perfiles" ayuda="Cada perfil es una forma de compilar. El que está activo compila al guardar." detectado={() => s.usarDetectado('perfiles')}>
-            <div className="proy-perfiles">
-              {Object.entries(config.profiles ?? {}).map(([id, perfil]) => (
-                <TarjetaDePerfil key={id} id={id} perfil={perfil} config={config} />
-              ))}
-            </div>
-            <div className="proy-fila">
-              <input placeholder="id del perfil nuevo (sin espacios)" value={perfilNuevo} onChange={(e) => setPerfilNuevo(e.target.value)} aria-label="Id del perfil nuevo" />
-              <button
-                className="boton chico"
-                disabled={!ID_DE_PERFIL.test(perfilNuevo) || perfilNuevo in (config.profiles ?? {})}
-                onClick={() => {
-                  s.editar((c) => fijarPerfil(c, perfilNuevo, { label: perfilNuevo, parts: 'all' }));
-                  setPerfilNuevo('');
-                }}
-              >
-                Agregar perfil
-              </button>
-            </div>
           </Seccion>
 
           <Seccion titulo="Salidas" ayuda="Dónde van el PDF que se publica y los PDF de cada capítulo exportado." detectado={() => s.usarDetectado('salidas')}>
@@ -424,6 +356,7 @@ export function ProyectoPantalla() {
           </Seccion>
 
           <Probar />
+          </details>
         </div>
       )}
 
@@ -451,7 +384,7 @@ export function ProyectoPantalla() {
               {s.validacion === null ? 'Revisando…' : valida ? '✓ La configuración es válida' : `✘ ${s.validacion.errores[0] ?? 'La configuración no es válida'}`}
             </span>
             <button className="boton primario" disabled={!valida} onClick={() => void s.pedirGuardar()}>
-              Guardar…
+              {s.guardando ? 'Guardando…' : 'Guardar'}
             </button>
           </>
         )}

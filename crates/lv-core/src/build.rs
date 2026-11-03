@@ -137,6 +137,11 @@ pub struct DriverSpec {
     pub solo_cache: bool,
     /// Vista previa de un fragmento (8.2): el documento no lleva ninguna parte y el fragmento entra al principio del cuerpo.
     pub fragmento: bool,
+    /// Piezas del documento que el perfil saca (índice, bibliografía, un PDF insertado...).
+    pub omitir: Vec<crate::piezas::Pieza>,
+    /// Archivos del proyecto que se compilan desde una copia con los bloques de las piezas omitidas comentados: `(original, copia)`,
+    /// relativos a la raíz.
+    pub sustituciones: Vec<(String, String)>,
 }
 
 /// Dónde escribe la app el fragmento de la vista previa.
@@ -255,6 +260,21 @@ pub fn render_driver_spec(s: &DriverSpec) -> Result<String> {
     if let Some(f) = &s.figuras {
         l.extend(render_figuras(f)?);
     }
+    l.extend(crate::piezas::lineas_del_driver(&s.omitir));
+    // Los archivos con piezas sacadas se leen desde su copia (`\declare@file@substitution`, núcleo de LaTeX 2020-10): el proyecto no se
+    // toca. La raíz no pasa por `\input` con su nombre, así que si es ella la que tiene la copia se carga la copia directamente.
+    let mut raiz = s.root_rel.clone();
+    let otras: Vec<&(String, String)> = s.sustituciones.iter().filter(|(o, c)| if *o == s.root_rel { raiz = c.clone(); false } else { true }).collect();
+    if !otras.is_empty() {
+        l.push("\\makeatletter".into());
+        for (o, c) in otras {
+            if let Some(ch) = o.chars().chain(c.chars()).find(|ch| PROHIBIDOS_EN_LA_RAIZ.contains(*ch)) {
+                return Err(Error::InvalidPath(format!("{o:?}: el carácter {ch:?} no se puede sustituir")));
+            }
+            l.push(format!("\\declare@file@substitution{{{o}}}{{{c}}}"));
+        }
+        l.push("\\makeatother".into());
+    }
     if s.solo_cache {
         // Va por hook y no en el preámbulo: la raíz (o el bloque `app`) llama a `\tikzexternalize` con su propio modo, y el hook
         // corre después, justo antes de `\begin{document}`.
@@ -276,7 +296,7 @@ pub fn render_driver_spec(s: &DriverSpec) -> Result<String> {
         // parte entra, así que el PDF es sólo el fragmento (más lo que la raíz imprima fuera de las partes).
         l.push("\\AddToHook{begindocument/end}{\\input{.lv/fragment/frag}}".into());
     }
-    let base = s.root_rel.strip_suffix(".tex").or_else(|| s.root_rel.strip_suffix(".TEX")).unwrap_or(&s.root_rel);
+    let base = raiz.strip_suffix(".tex").or_else(|| raiz.strip_suffix(".TEX")).unwrap_or(&raiz);
     l.push(format!("\\input{{\"{base}\"}}"));
     Ok(l.join("\n") + "\n")
 }
@@ -356,6 +376,11 @@ pub struct RunSpec {
     pub shell_escape: bool,
     /// Es el reintento después de reparar un `.aux` truncado.
     pub retry: bool,
+    /// Una sola pasada y sin biber (la vista previa de un fragmento): las referencias y las citas salen de lo que dejaron las
+    /// compilaciones anteriores. Medido en el libro: 3 o 4 pasadas de 1,5 s más biber (6,6 a 8,4 s) por un párrafo.
+    pub una_pasada: bool,
+    /// El formato con el preámbulo precompilado (`formato.rs`), relativo a la raíz y sin `.fmt`: va a pdflatex como `-fmt=`.
+    pub formato: Option<String>,
 }
 
 impl RunSpec {
@@ -368,6 +393,8 @@ impl RunSpec {
             engine: "pdflatex".into(),
             shell_escape: false,
             retry: false,
+            una_pasada: false,
+            formato: None,
         })
     }
 }
@@ -600,7 +627,17 @@ impl Builder {
         if !raiz.is_file() {
             return Err(Error::NotFound(spec.root_rel.clone()));
         }
-        let args = latexmk_args_for(&spec.perfil, &spec.engine, spec.shell_escape)?;
+        let mut args = latexmk_args_for(&spec.perfil, &spec.engine, spec.shell_escape)?;
+        let una_pasada = spec.una_pasada;
+        if una_pasada {
+            // Antes del archivo (el último argumento). Sin comillas en el código: Windows se las come (ver el doctor).
+            let archivo = args.pop().unwrap_or_default();
+            args.extend(["-e".to_string(), "$max_repeat=1; $bibtex_use=0;".to_string(), archivo]);
+        }
+        if let Some(f) = &spec.formato {
+            let archivo = args.pop().unwrap_or_default();
+            args.extend([format!("-latexoption=-fmt={f}"), archivo]);
+        }
         antes()?;
         write_if_changed(&root.join(driver_rel(&spec.perfil)), &spec.driver)?;
         write_if_changed(&root.join(".lv").join("latexmkrc"), &render_latexmkrc())?;
@@ -694,7 +731,8 @@ impl Builder {
             let fue_cancelado = cancelado.load(Ordering::SeqCst);
             let existe = pdf_ruta.is_file();
             let updated = std::fs::metadata(&pdf_ruta).and_then(|m| m.modified()).is_ok_and(|m| m >= inicio_sistema);
-            let ok = !fue_cancelado && code == Some(0) && existe;
+            // Con una sola pasada latexmk sale con 12 («hacían falta más pasadas»): es lo esperado si el PDF se escribió ahora.
+            let ok = !fue_cancelado && existe && (code == Some(0) || (una_pasada && code == Some(12) && updated));
             // Se libera antes de avisar: quien reciba `Finished` puede lanzar otro build enseguida.
             if let Ok(mut g) = estado.lock() {
                 *g = None;
@@ -893,6 +931,8 @@ mod tests {
             figuras: None,
             solo_cache: false,
             fragmento: false,
+            omitir: vec![],
+            sustituciones: vec![],
         })
         .unwrap();
         assert_eq!(

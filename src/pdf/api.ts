@@ -9,6 +9,8 @@ export interface PdfApi {
   palabrasDePagina(n: number): Promise<PalabraPdf[]>;
   /** Resalta rectángulos de una página; el resaltado se desvanece solo. */
   resaltar(pagina: number, rects: Rect[], ms?: number): void;
+  /** La marca fija de «Seguir» (dónde está el cursor); `null` la saca. */
+  marcar?(pagina: number | null, rects?: Rect[]): void;
   /** Desplaza el PDF para que el rectángulo se vea, sólo si no estaba a la vista (lo deja a un tercio de la altura). */
   mostrar(pagina: number, rect: Rect): void;
   /** Si el rectángulo ya se ve en el visor. */

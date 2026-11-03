@@ -8,7 +8,7 @@
 //! sólo confirmando.
 
 use crate::config::{
-    nombre_de_exportacion, FlagsCfg, PartsCfg, PartsSel, ProfileCfg, ProjectConfig, PublishCfg, VariableCfg, PATRON_DE_EXPORTACION,
+    nombre_de_exportacion, FlagsCfg, PartsCfg, ProfileCfg, ProjectConfig, PublishCfg, VariableCfg, PATRON_DE_EXPORTACION,
 };
 use crate::doctor;
 use crate::error::{Error, Result};
@@ -135,6 +135,8 @@ pub struct Propuesta {
     pub raiz: String,
     pub candidatas: Vec<Candidata>,
     pub partes: Vec<String>,
+    /// Las piezas del documento que un perfil puede sacar (carátula, índice, bibliografía...), en el orden del libro.
+    pub piezas: Vec<crate::piezas::PiezaInfo>,
     pub parts_commands: Vec<String>,
     pub flags: Vec<FlagDetectado>,
     pub figuras: FigurasDetectadas,
@@ -707,62 +709,11 @@ pub fn detectar(root: &Path, raiz: Option<&str>, actual: Option<&ProjectConfig>,
     let externaliza = figuras.modo != "off";
     let stem = stem_de(&raiz).to_string();
 
-    // Perfiles: lo mismo que `infer_config`, más lo que se detectó.
-    let mut perfiles = IndexMap::new();
-    let mut tarjetas = Vec::new();
-    let mut tarjeta = |id: &str, p: &ProfileCfg, uso: &str, publica: Option<String>| {
-        tarjetas.push(PerfilPropuesto { id: id.to_string(), label: p.label.clone().unwrap_or_else(|| id.to_string()), uso: uso.to_string(), tipico: tipicos.get(id).cloned(), publica });
-    };
-    let mut agregar = |id: &str, p: ProfileCfg, uso: &str, publica: Option<String>| {
-        tarjeta(id, &p, uso, publica);
-        perfiles.insert(id.to_string(), p);
-    };
-    let con_entrega = externaliza && figuras.modo == "project";
+    // Perfiles: ninguno. Los arma la persona en la pantalla de perfiles; la app sólo detecta con qué (capítulos, piezas, figuras).
+    let perfiles: IndexMap<String, ProfileCfg> = IndexMap::new();
+    let tarjetas: Vec<PerfilPropuesto> = Vec::new();
+    let _ = (reducida, externaliza, tipicos);
     let hay_publicacion = publicar_de_latexmkrc(root);
-    let nombre_publicado = |id: &str| hay_publicacion.as_ref().map(|d| format!("{d}/{stem} ({id}).pdf"));
-    if tiene_partes {
-        agregar(
-            "parcial",
-            ProfileCfg { label: Some("Partes elegidas".into()), partial: true, externalize: externaliza, parts: PartsSel::Selection, ..Default::default() },
-            "Mientras escribís: compila sólo las partes que elegís. Es el que se usa al guardar.",
-            nombre_publicado("parcial"),
-        );
-        agregar(
-            "rapido",
-            ProfileCfg {
-                label: Some(if reducida { "Libro rápido" } else { "Todas las partes" }.into()),
-                partial: true,
-                externalize: externaliza,
-                parts: PartsSel::All,
-                ..Default::default()
-            },
-            "Leer de corrido: todas las partes, sin portada ni índices.",
-            nombre_publicado("rapido"),
-        );
-    }
-    if con_entrega {
-        agregar(
-            "completo",
-            ProfileCfg { label: Some("Libro completo (revisión, con cache)".into()), externalize: true, cache_only: true, auto_compile: false, ..Default::default() },
-            "Revisar el libro entero con el cache de figuras: rápido, pero no se publica.",
-            None,
-        );
-        agregar(
-            "entrega",
-            ProfileCfg { label: Some("Entrega (sin cache)".into()), clean_before: true, auto_compile: false, ..Default::default() },
-            "Entregar: el libro completo sin cache, desde cero. Es el único que se publica.",
-            Some(hay_publicacion.as_ref().map_or_else(|| format!("{stem}.pdf"), |d| format!("{d}/{stem}.pdf"))),
-        );
-    } else if tiene_partes {
-        agregar(
-            "completo",
-            ProfileCfg { label: Some("Documento completo".into()), auto_compile: false, ..Default::default() },
-            "Entregar: el documento completo.",
-            nombre_publicado("completo"),
-        );
-    } else {
-        agregar("completo", ProfileCfg { label: Some("Documento".into()), ..Default::default() }, "El documento completo.", nombre_publicado("completo"));
-    }
 
     // Salidas.
     let publish = hay_publicacion.as_ref().map(|d| {
@@ -805,14 +756,21 @@ pub fn detectar(root: &Path, raiz: Option<&str>, actual: Option<&ProjectConfig>,
         export,
         extra: Default::default(),
     };
-    cfg.validate()?;
+    // La propuesta va sin perfiles (los arma la persona): se valida el resto. Guardar sí exige al menos uno.
+    let mut para_validar = cfg.clone();
+    if para_validar.profiles.is_empty() {
+        para_validar.profiles.insert("x".into(), ProfileCfg::default());
+    }
+    para_validar.validate()?;
     let mut avisos = figuras.avisos.clone();
     if cands.len() > 1 && !cands.iter().any(|c| c.rol == RolDeRaiz::Principal) {
         avisos.push("Ninguna raíz parece el documento principal: elegí cuál compilar.".into());
     }
     let mut texto = serde_json::to_string_pretty(&cfg).map_err(|e| Error::Other(e.to_string()))?;
     texto.push('\n');
+    let piezas = crate::piezas::detectar(root, &ix);
     Ok(Propuesta {
+        piezas,
         texto,
         raiz,
         candidatas: cands,
@@ -934,10 +892,10 @@ mod tests {
     }
 
     #[test]
-    fn un_articulo_sin_partes_ni_tikz_propone_un_solo_perfil_y_sin_cache() {
+    fn un_articulo_sin_partes_ni_tikz_no_propone_perfiles_ni_cache() {
         let d = proyecto(&[("main.tex", "\\documentclass{article}\n\\begin{document}Hola\\end{document}\n")]);
         let p = detectar(d.path(), None, None, &BTreeMap::new()).unwrap();
-        assert_eq!(p.perfiles.iter().map(|x| x.id.as_str()).collect::<Vec<_>>(), ["completo"]);
+        assert!(p.perfiles.is_empty(), "los perfiles los arma la persona");
         assert_eq!(p.figuras.modo, "off");
         assert!(p.config.get("figureCache").is_none() && p.config.get("export").is_none() && p.config.get("publish").is_none());
         assert_eq!(p.parts_commands, ["include"]);
@@ -954,10 +912,6 @@ mod tests {
         assert_eq!((p.figuras.modo.as_str(), p.figuras.stamp_files.as_slice()), ("app", ["estilo.tex".to_string()].as_slice()));
         assert_eq!(p.config["figureCache"]["mode"], "app");
         assert_eq!(p.config["figureCache"]["stampFiles"], json!(["estilo.tex"]));
-        // Los perfiles que escriben usan el cache; no hay `entrega` aparte (sin cache de proyecto no hace falta).
-        let ids: Vec<&str> = p.perfiles.iter().map(|x| x.id.as_str()).collect();
-        assert_eq!(ids, ["parcial", "rapido", "completo"]);
-        assert_eq!(p.config["profiles"]["parcial"]["externalize"], true);
     }
 
     #[test]
@@ -988,15 +942,6 @@ mod tests {
         let d = proyecto(&[("main.tex", "\\documentclass{book}\n\\begin{document}\\include{cap}\\end{document}\n"), ("cap.tex", "x\n"), ("latexmkrc", "$out_dir = 'build';\n")]);
         let p = detectar(d.path(), None, None, &BTreeMap::new()).unwrap();
         assert_eq!((p.salidas.publicar, p.salidas.exportar.as_deref()), (None, Some("export")));
-    }
-
-    #[test]
-    fn los_tiempos_tipicos_del_historial_van_a_las_tarjetas_de_los_perfiles() {
-        let d = proyecto(&[("main.tex", "\\documentclass{book}\n\\begin{document}\\include{cap}\\end{document}\n"), ("cap.tex", "x\n")]);
-        let t: BTreeMap<String, Tipico> = [("parcial".to_string(), Tipico { ms: 4800, pasadas: 1, n: 5 })].into();
-        let p = detectar(d.path(), None, None, &t).unwrap();
-        assert_eq!(p.perfiles.iter().find(|x| x.id == "parcial").unwrap().tipico, Some(Tipico { ms: 4800, pasadas: 1, n: 5 }));
-        assert!(p.perfiles.iter().find(|x| x.id == "rapido").unwrap().tipico.is_none());
     }
 
     /// La raíz y el motor: un comentario mágico manda, `fontspec` sugiere xelatex.

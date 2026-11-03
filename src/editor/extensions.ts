@@ -102,8 +102,21 @@ export function setManejadorDefinicion(f: () => void): void {
   alClicDefinicion = f;
 }
 
+let alDobleClic: () => void = () => {};
+
+/** Qué hace el doble clic en el código (saltar al PDF y resaltar la palabra). */
+export function setManejadorDobleClic(f: () => void): void {
+  alDobleClic = f;
+}
+
 /** Ctrl+clic: CodeMirror lo usa para agregar un cursor; acá es "ir a la definición" (el multicursor sigue con Alt+clic). */
 const ctrlClic = EditorView.domEventHandlers({
+  // Doble clic: CodeMirror ya seleccionó la palabra; con eso se salta al PDF y se resalta esa palabra exacta (como el doble clic en el
+  // PDF lleva a la palabra del código). Va después del evento, cuando la selección ya está puesta.
+  dblclick() {
+    setTimeout(() => alDobleClic(), 0);
+    return false;
+  },
   mousedown(e, view) {
     if (e.button !== 0 || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return false;
     const pos = view.posAtCoords({ x: e.clientX, y: e.clientY });

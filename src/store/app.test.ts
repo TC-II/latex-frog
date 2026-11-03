@@ -51,6 +51,12 @@ const perfil = (id: string, o: Partial<ProfileInfo> = {}): ProfileInfo => ({
   hidden: false,
   draftImages: false,
   publica: false,
+  partList: [],
+  omit: [],
+  color: null,
+  vars: {},
+  output: null,
+  compileOn: null,
   ...o,
 });
 
@@ -63,6 +69,7 @@ const estadoBase = (): AppStateInfo => ({
   idleMs: 500,
   outsideSave: 'warn',
   draftImages: false,
+  currentPart: null,
 });
 
 function infoDe(o: Partial<ProjectInfo> = {}): ProjectInfo {
@@ -88,6 +95,7 @@ function infoDe(o: Partial<ProjectInfo> = {}): ProjectInfo {
     ],
     indexMs: 3,
     lockedBy: null,
+    piezas: [],
     ...o,
   };
 }
@@ -102,6 +110,7 @@ function propuestaBase(raiz?: string): Propuesta {
       { archivo: 'cap_actual.tex', rol: 'auxiliar', recomendada: false, motivo: 'Raíz auxiliar', alcanza: 3, includeonlyPropio: 'Secciones/Uno', flagsPrevios: [], incluidaPor: [] },
     ],
     partes: ['Secciones/Uno', 'Secciones/Dos'],
+    piezas: [],
     partsCommands: ['include'],
     flags: [],
     figuras: { modo: 'off', dir: 'figuras-cache', stampFiles: [], motivo: 'No usa TikZ', avisos: [] },
@@ -1000,22 +1009,19 @@ describe('cierre de la ventana y cambio de proyecto', () => {
 describe('pantalla Proyecto (F8b)', () => {
   const p = () => useProyecto.getState();
 
-  it('sólo confirmando: abrir, guardar y confirmar escribe exactamente lo que se detectó y la app queda con esa configuración', async () => {
+  it('Guardar escribe exactamente lo que se detectó, sin un paso de confirmación, y la app queda con esa configuración', async () => {
     const f = falso({}, { configSaved: false });
     await st().abrirProyecto('/libro');
     await vi.waitFor(() => expect(p().validacion?.ok).toBe(true));
     const propuesta = p().propuesta!;
     await p().pedirGuardar();
-    expect(p().paso).toBe('confirmar');
-    expect(p().diff.every((l) => l.tipo === 'agrega'), 'sin archivo en el disco todo se agrega').toBe(true);
-    expect(await p().confirmarGuardado()).toBe(true);
     expect(f.control.escrito).toEqual([propuesta.texto]);
     expect(p().abierta).toBe(false);
     expect(st().project?.configSaved).toBe(true);
     expect(st().notice?.texto).toBe('latexviewer.json guardado en la carpeta del proyecto.');
   });
 
-  it('con un latexviewer.json en el disco se parte de él (la detección sólo sugiere) y el diff muestra lo que cambia', async () => {
+  it('con un latexviewer.json en el disco se parte de él (la detección sólo sugiere) y se guarda lo cambiado', async () => {
     const f = falso({});
     f.control.configEnDisco = '{\n  "root": "cap_actual.tex",\n  "profiles": {\n    "completo": {}\n  }\n}\n';
     await p().abrir();
@@ -1024,9 +1030,7 @@ describe('pantalla Proyecto (F8b)', () => {
     p().usarDetectado('raiz');
     expect(p().config?.root).toBe('main.tex');
     await p().pedirGuardar();
-    const tipos = p().diff.filter((l) => l.tipo !== 'igual').map((l) => `${l.tipo}:${l.texto.trim()}`);
-    expect(tipos).toContain('quita:"root": "cap_actual.tex",');
-    expect(tipos).toContain('agrega:"root": "main.tex",');
+    expect(f.control.escrito[0]).toContain('"root": "main.tex"');
   });
 
   it('un latexviewer.json ilegible avisa y se parte de lo detectado', async () => {

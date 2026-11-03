@@ -162,6 +162,8 @@ impl Session {
             figuras,
             solo_cache: false,
             fragmento: false,
+            omitir: vec![],
+            sustituciones: vec![],
         })?;
         crate::build::write_if_changed(&self.root.join(cocinero::driver_cocina_rel()), &driver)?;
         aux::ensure_include_dirs(&self.root, PERFIL_COCINA, &ix.include_dirs(&cfg.parts.commands))?;

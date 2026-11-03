@@ -83,6 +83,11 @@ pub enum PartsSel {
     All,
     /// Una sola, la que pide quien lanza el build (exportación, F7).
     One,
+    /// La parte del último archivo guardado (o abierto) que pertenece a una parte, más las de `partList`. No es un capítulo fijo:
+    /// cambia solo cuando se trabaja en otro.
+    Current,
+    /// Sólo las de `partList`.
+    List,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -114,6 +119,39 @@ pub struct ProfileCfg {
     /// `\PassOptionsToPackage{draft}{graphicx}`: imágenes como cuadros, para proyectos con muchas.
     #[serde(default, skip_serializing_if = "es_falso")]
     pub draft_images: bool,
+    /// Partes fijas: con `parts: "list"` son todas las que entran; con `"current"` se suman a la del archivo actual.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub part_list: Vec<String>,
+    /// Piezas del documento que este perfil saca (`piezas::Pieza::clave`): `toc`, `bibliography`, `index` o `pdf:<archivo>`. La app
+    /// las anula desde el driver, sin tocar el proyecto (ver `piezas.rs`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub omit: Vec<String>,
+    /// Color del perfil en la interfaz (`#rrggbb`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// Valores de las variables del proyecto para este perfil (el pie de la entrega no es el del borrador). Ganan sobre los de la
+    /// máquina (`state.json`).
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub vars: IndexMap<String, String>,
+    /// Adónde va el PDF. Sin `output` el perfil es sólo para ver en la app.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<OutputCfg>,
+    /// Cuándo compila solo (con `autoCompile`): `save` al guardar (por omisión) o `idle` al dejar de tipear.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compile_on: Option<String>,
+}
+
+/// La salida de un perfil: una carpeta (relativa a la raíz; puede salir de ella) y un patrón de nombre.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct OutputCfg {
+    pub dir: String,
+    /// `{n}` (consecutivo), `{cap}` (número impreso del capítulo), `{nombre}` (de la pieza) y `{perfil}`; `{n:02}` y `{cap:02}`
+    /// completan con ceros.
+    pub pattern: String,
+    /// Un PDF por capítulo en lugar de uno solo.
+    #[serde(default, skip_serializing_if = "es_falso")]
+    pub per_part: bool,
 }
 
 impl PartsSel {
@@ -135,6 +173,12 @@ impl Default for ProfileCfg {
             auto_compile: true,
             hidden: false,
             draft_images: false,
+            part_list: vec![],
+            omit: vec![],
+            color: None,
+            vars: IndexMap::new(),
+            output: None,
+            compile_on: None,
         }
     }
 }
@@ -192,6 +236,12 @@ pub const PATRON_DE_EXPORTACION: &str = "{num:02} - {name}.pdf";
 /// El nombre de un PDF exportado: el patrón con el número y el nombre de la parte. Sin caracteres que Windows no admita en un
 /// nombre de archivo, y siempre con `.pdf`.
 pub fn nombre_de_exportacion(patron: &str, num: &str, nombre: &str) -> String {
+    nombre_de_salida(patron, num, num, nombre, "")
+}
+
+/// El nombre de un PDF de la salida de un perfil. Acepta los campos de la exportación (`{num}`, `{name}`) y los de la pantalla de
+/// perfiles: `{n}` (consecutivo), `{cap}` (número impreso), `{nombre}` y `{perfil}`, con `:0N` para completar con ceros.
+pub fn nombre_de_salida(patron: &str, n: &str, cap: &str, nombre: &str, perfil: &str) -> String {
     let limpio = |t: &str| -> String {
         let s: String = t.chars().map(|c| if matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') || c.is_control() { '-' } else { c }).collect();
         s.trim().trim_end_matches('.').to_string()
@@ -206,19 +256,28 @@ pub fn nombre_de_exportacion(patron: &str, num: &str, nombre: &str) -> String {
             break;
         };
         let campo = &resto[i + 1..i + j];
-        match campo {
-            "name" => out.push_str(&limpio(nombre)),
-            "num" => out.push_str(&limpio(num)),
-            c if c.starts_with("num:0") && c[5..].parse::<usize>().is_ok() => {
-                let ancho: usize = c[5..].parse().unwrap_or(0);
-                let n = limpio(num);
-                if n.chars().all(|ch| ch.is_ascii_digit()) {
-                    out.push_str(&format!("{n:0>ancho$}"));
+        let (clave, ancho) = match campo.split_once(":0") {
+            Some((k, w)) if w.parse::<usize>().is_ok() => (k, w.parse::<usize>().ok()),
+            _ => (campo, None),
+        };
+        let valor = match clave {
+            "name" | "nombre" => Some(nombre),
+            "num" | "cap" => Some(cap),
+            "n" => Some(n),
+            "perfil" => Some(perfil),
+            _ => None,
+        };
+        match (valor, ancho) {
+            (Some(v), Some(ancho)) => {
+                let v = limpio(v);
+                if !v.is_empty() && v.chars().all(|ch| ch.is_ascii_digit()) {
+                    out.push_str(&format!("{v:0>ancho$}"));
                 } else {
-                    out.push_str(&n);
+                    out.push_str(&v);
                 }
             }
-            otro => out.push_str(&format!("{{{otro}}}")),
+            (Some(v), None) => out.push_str(&limpio(v)),
+            (None, _) => out.push_str(&format!("{{{campo}}}")),
         }
         resto = &resto[i + j + 1..];
     }
@@ -252,9 +311,20 @@ impl ProjectConfig {
         if self.profiles.is_empty() {
             return mal("no hay ningún perfil en `profiles`".into());
         }
-        for id in self.profiles.keys() {
+        for (id, p) in &self.profiles {
             if !perfil_valido(id) {
                 return mal(format!("el perfil {id:?} no es válido (ASCII, sin espacios: es el nombre del driver)"));
+            }
+            if let Some(c) = &p.color {
+                if !(c.len() == 7 && c.starts_with('#') && c[1..].chars().all(|x| x.is_ascii_hexdigit())) {
+                    return mal(format!("el color {c:?} del perfil {id:?} no es #rrggbb"));
+                }
+            }
+            if let Some(o) = p.omit.iter().find(|o| crate::piezas::Pieza::de_clave(o).is_none()) {
+                return mal(format!("el perfil {id:?} saca {o:?}, que no es una pieza (toc, bibliography, index o pdf:<archivo>)"));
+            }
+            if p.parts == PartsSel::List && p.part_list.is_empty() {
+                return mal(format!("el perfil {id:?} compila una lista de partes vacía"));
             }
         }
         for m in self.flags.partial.iter().chain(&self.flags.externalize).chain(&self.flags.figure_list).chain(self.variables.keys()) {
@@ -417,6 +487,9 @@ pub struct State {
     /// El «Fast [draft]» de Overleaf (F8c): las imágenes salen como cajas del tamaño que tendrían, sin incluir el archivo. Es de esta
     /// máquina y no se aplica a lo que se entrega (la exportación ni un perfil de `publish.names`): ver `Session::borrador_para`.
     pub draft_images: bool,
+    /// La parte del último archivo guardado que pertenece a una: la que compila un perfil `parts: "current"`. Se guarda para que
+    /// al volver a abrir el proyecto ese perfil siga compilando lo mismo.
+    pub current_part: Option<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -431,6 +504,7 @@ impl Default for State {
             idle_ms: 1500,
             outside_save: OutsideSave::Warn,
             draft_images: false,
+            current_part: None,
             extra: Map::new(),
         }
     }
