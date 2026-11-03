@@ -133,7 +133,7 @@ fn el_driver_del_parcial_lleva_flags_variables_e_includeonly_de_la_seleccion() {
     esperar_finales(&r, 1, 60);
     assert_eq!(
         driver(&d, "parcial"),
-        "% .lv/drivers/lv-parcial.tex (generado por LaTeX Viewer, no editar)\n\\def\\lvPerfil{parcial}\n\\def\\lvParcial{1}\n\\def\\CompilacionReducida{}\n\\def\\TikzExternalizar{}\n\\def\\OpcionPie{completo}\n\\AddToHook{begindocument/before}{\\includeonly{Secciones/Dos}}\n\\input{\"main\"}\n"
+        "% .lv/drivers/lv-parcial.tex (generado por Latex Frog, no editar)\n\\def\\lvPerfil{parcial}\n\\def\\lvParcial{1}\n\\def\\CompilacionReducida{}\n\\def\\TikzExternalizar{}\n\\def\\OpcionPie{completo}\n\\AddToHook{begindocument/before}{\\includeonly{Secciones/Dos}}\n\\input{\"main\"}\n"
     );
     // Cambiar la variable y compilar el rápido: con el valor nuevo y, como es de todas las partes, con la lista COMPLETA en el \includeonly
     // (F8b: una raíz con su propio \includeonly no lo recorta, S6).

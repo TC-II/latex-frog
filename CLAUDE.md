@@ -1,6 +1,8 @@
-# LaTeX Viewer 2: guía de trabajo
+# Latex Frog: guía de trabajo
 
 App de escritorio (Tauri 2 + React + CodeMirror 6 + PDF.js, core en Rust) para editar y compilar proyectos LaTeX grandes. La fuente de verdad del diseño es `plan.md`: leerlo entero antes de tocar nada. Las decisiones marcadas **[decidido]** no se reabren sin preguntar; las marcadas **[spike]** se validan con código y medición, y el resultado va a `docs/spikes/Sx.md`.
+
+**Latex Frog es un fork** (`TC-II/latex-frog`) del LaTeX Viewer de Juan (`juan-sb/latex-editor`, remoto `juan`). El dueño del fork es Javier: lo que dice «se pregunta a Juan» se le pregunta a Javier. El nombre nuevo es sólo el visible (ventana, instalador, identificador `ar.tcii.latexfrog`); los nombres internos (`latexviewer.json`, `.lv/`, `lv-core`, `lv-app.exe`, `LV_*`) se mantienen a propósito para que los proyectos ya configurados con la app de Juan sigan andando.
 
 El caso de prueba y la vara de rendimiento es el libro de `inspo/Proyecto`. Windows + MiKTeX es el entorno real; TeX Live / Linux no se rompen sin necesidad.
 
@@ -38,7 +40,7 @@ Si un spike o la implementación contradicen el plan, se actualiza `plan.md` y s
 - `cargo test -p lv-core`: unitarios del core (EOL y BOM, rutas, proyecto, configuración, grafo de inclusión, auxiliares, runner del build y sesión con un latexmk falso de PowerShell). **Es `-p lv-core` y no `--workspace`**: `src-tauri` necesita `dist/` para compilar.
 - `cargo test -p lv-core --features tex`: integración con TeX real (latexmk, pdflatex, biber), incluida la sesión alternando perfiles; se corre local.
 - `npm test` (Vitest) y `npm run typecheck`: el frontend. Los tests no importan `pdfjs-dist` (la lógica del visor va aparte).
-- `npx tauri build --no-bundle`: compila la app (`target\release\lv-app.exe`) y corre `npm run build` antes. `npx tauri dev` para desarrollar. **`npx tauri build` (sin `--no-bundle`) arma el instalador NSIS** en `target\release\bundle\nsis\LaTeX Viewer_<versión>_x64-setup.exe` (por usuario, sin administrador, sin firmar; la primera vez baja NSIS de GitHub). Instalar y desinstalar sin ventanas: `setup.exe /S` y `%LOCALAPPDATA%\LaTeX Viewer\uninstall.exe /S`. La versión (0.9.2) está en `tauri.conf.json`, `src-tauri/Cargo.toml` y `package.json`; `INSTALAR.md` es la guía para el autor.
+- `npx tauri build --no-bundle`: compila la app (`target\release\lv-app.exe`) y corre `npm run build` antes. `npx tauri dev` para desarrollar. **`npx tauri build` (sin `--no-bundle`) arma el instalador NSIS** en `target\release\bundle\nsis\Latex Frog_<versión>_x64-setup.exe` (por usuario, sin administrador, sin firmar; la primera vez baja NSIS de GitHub). Instalar y desinstalar sin ventanas: `setup.exe /S` y `%LOCALAPPDATA%\Latex Frog\uninstall.exe /S`. La versión (0.9.2) está en `tauri.conf.json`, `src-tauri/Cargo.toml` y `package.json`; `INSTALAR.md` es la guía para el autor.
 - `cargo run -p lv-core --example build -- <carpeta> [perfil] [--root <raíz.tex>] [--parts "A,B"]`: compila con el mismo motor que la app (perfiles, partes, sembrado, reparación), sin interfaz.
 - `scripts/aceptacion-f1.ps1 -Proyecto libro-tc|libro-include|articulo-simple`: el smoke de F1 dentro de la app real (`LV_SMOKE=1`).
 - `scripts/aceptacion-f2.ps1`: el smoke de F2 sobre una copia tibia del libro (`LV_SMOKE=f2`, unos 6 minutos): perfiles, sembrado, guardar a PDF visible, cola, cancelar, recarga sin parpadeo, publicar. Necesita el cache de figuras tibio de `fixtures\libro-tc`.

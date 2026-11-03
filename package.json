@@ -1,9 +1,9 @@
 {
-  "name": "latex-viewer-2",
+  "name": "latex-frog",
   "private": true,
   "version": "0.9.2",
   "type": "module",
-  "description": "LaTeX Viewer 2: editor de proyectos LaTeX grandes",
+  "description": "Latex Frog: editor de proyectos LaTeX grandes",
   "scripts": {
     "dev": "vite --port 1420 --strictPort",
     "build": "vite build",

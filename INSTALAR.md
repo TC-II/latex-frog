@@ -1,4 +1,4 @@
-# Instalar LaTeX Viewer 0.9.2
+# Instalar Latex Frog 0.9.2
 
 Editor de proyectos LaTeX grandes para Windows: compila solo lo que cambió (partes, cache de figuras), muestra el PDF al lado y salta del código al PDF y al revés.
 
@@ -13,9 +13,9 @@ No hace falta tener VS Code ni SumatraPDF: el editor y el visor del PDF son los 
 
 ## Instalar
 
-1. Ejecutar `LaTeX Viewer_0.9.2_x64-setup.exe`. Se instala **para el usuario actual**, sin permisos de administrador, y crea un acceso directo en el menú Inicio.
+1. Ejecutar `Latex Frog_0.9.2_x64-setup.exe`. Se instala **para el usuario actual**, sin permisos de administrador, y crea un acceso directo en el menú Inicio.
 2. **Windows va a mostrar «Windows protegió su PC» (SmartScreen).** El instalador no está firmado. Apretar «Más información» y después «Ejecutar de todas formas».
-3. Abrir LaTeX Viewer.
+3. Abrir Latex Frog.
 
 ## La primera vez con un proyecto
 
@@ -51,4 +51,4 @@ La app guarda lo suyo en la carpeta `.lv/` del proyecto (si el proyecto es un re
 
 ## Desinstalar
 
-Configuración › Aplicaciones › LaTeX Viewer › Desinstalar. Los proyectos no se tocan (la carpeta `.lv/` de cada uno se puede borrar a mano).
+Configuración › Aplicaciones › Latex Frog › Desinstalar. Los proyectos no se tocan (la carpeta `.lv/` de cada uno se puede borrar a mano).

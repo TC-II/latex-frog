@@ -233,7 +233,7 @@ pub fn render_driver_spec(s: &DriverSpec) -> Result<String> {
         return Err(Error::InvalidPath(format!("{:?}: el carácter {c:?} rompe \\input", s.root_rel)));
     }
     let mut l = vec![
-        format!("% {} (generado por LaTeX Viewer, no editar)", driver_rel(perfil)),
+        format!("% {} (generado por Latex Frog, no editar)", driver_rel(perfil)),
         format!("\\def\\lvPerfil{{{perfil}}}"),
         format!("\\def\\lvParcial{{{}}}", if s.partial { 1 } else { 0 }),
     ];
@@ -318,7 +318,7 @@ pub fn render_driver(perfil: &str, root_rel: &str) -> Result<String> {
 ///   (F1, paso 0: es el perfil que S1 no había probado, porque ni el parcial ni el rápido llevan índice).
 pub fn render_latexmkrc() -> String {
     [
-        "# LaTeX Viewer: auxiliares y PDF por perfil. Se lee DESPUÉS del latexmkrc del proyecto.",
+        "# Latex Frog: auxiliares y PDF por perfil. Se lee DESPUÉS del latexmkrc del proyecto.",
         "use Cwd;",
         "my $p = $ENV{LV_PERFIL} or die 'falta LV_PERFIL';",
         "my $sep = ($^O eq 'MSWin32') ? ';' : ':';",
@@ -824,7 +824,7 @@ mod tests {
         let d = render_driver("completo", "Funciones de Aproximación.tex").unwrap();
         assert_eq!(
             d,
-            "% .lv/drivers/lv-completo.tex (generado por LaTeX Viewer, no editar)\n\\def\\lvPerfil{completo}\n\\def\\lvParcial{0}\n\\input{\"Funciones de Aproximación\"}\n"
+            "% .lv/drivers/lv-completo.tex (generado por Latex Frog, no editar)\n\\def\\lvPerfil{completo}\n\\def\\lvParcial{0}\n\\input{\"Funciones de Aproximación\"}\n"
         );
         assert!(!d.contains("CompilacionReducida"));
         assert!(render_driver("completo", "Secciones/x.tex").unwrap().contains("\\input{\"Secciones/x\"}"));
@@ -937,7 +937,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             d,
-            "% .lv/drivers/lv-parcial.tex (generado por LaTeX Viewer, no editar)\n\\def\\lvPerfil{parcial}\n\\def\\lvParcial{1}\n\\PassOptionsToPackage{draft}{graphicx}\n\\PassOptionsToPackage{draft}{graphics}\n\\def\\CompilacionReducida{}\n\\def\\TikzExternalizar{}\n\\def\\OpcionPie{autor}\n\\AddToHook{begindocument/before}{\\includeonly{Secciones/Desnormalización,Secciones/Uno}}\n\\input{\"Funciones de Aproximación\"}\n"
+            "% .lv/drivers/lv-parcial.tex (generado por Latex Frog, no editar)\n\\def\\lvPerfil{parcial}\n\\def\\lvParcial{1}\n\\PassOptionsToPackage{draft}{graphicx}\n\\PassOptionsToPackage{draft}{graphics}\n\\def\\CompilacionReducida{}\n\\def\\TikzExternalizar{}\n\\def\\OpcionPie{autor}\n\\AddToHook{begindocument/before}{\\includeonly{Secciones/Desnormalización,Secciones/Uno}}\n\\input{\"Funciones de Aproximación\"}\n"
         );
     }
 

@@ -2,7 +2,7 @@
 name = "lv-core"
 version = "0.1.0"
 edition = "2021"
-description = "Core de LaTeX Viewer 2: archivos, proyecto y compilación. Sin dependencias de Tauri."
+description = "Core de Latex Frog: archivos, proyecto y compilación. Sin dependencias de Tauri."
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

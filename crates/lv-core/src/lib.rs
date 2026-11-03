@@ -1,4 +1,4 @@
-//! Core de LaTeX Viewer 2. Biblioteca sin dependencias de Tauri: se prueba sin interfaz y la capa de `src-tauri` sólo
+//! Core de Latex Frog. Biblioteca sin dependencias de Tauri: se prueba sin interfaz y la capa de `src-tauri` sólo
 //! la expone. Todas las rutas del protocolo son relativas a la raíz del proyecto y llevan `/`.
 
 // No se llama `aux`: es un nombre reservado de Windows (`aux.rs` se crea pero git no lo puede agregar).

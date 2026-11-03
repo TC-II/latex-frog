@@ -2,7 +2,7 @@
 name = "lv-app"
 version = "0.9.2"
 edition = "2021"
-description = "LaTeX Viewer 2: capa fina de Tauri sobre lv-core"
+description = "Latex Frog: capa fina de Tauri sobre lv-core"
 default-run = "lv-app"
 
 [build-dependencies]
