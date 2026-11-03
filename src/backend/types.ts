@@ -87,9 +87,49 @@ export interface AppStateInfo {
   draftImages: boolean;
   /** La parte del último archivo guardado: la que compila un perfil `parts: "current"`. */
   currentPart: string | null;
+  /** La vista previa en vivo con TeXpresso, prendida en esta máquina (se cambia con `texpressoActivar`, no con `setState`). */
+  texpresso?: boolean;
 }
 
-export type StatePatch = Partial<Omit<AppStateInfo, 'root' | 'currentPart'>>;
+export type StatePatch = Partial<Omit<AppStateInfo, 'root' | 'currentPart' | 'texpresso'>>;
+
+// --- TeXpresso (vista previa en vivo, en WSL) ---------------------------------------------------------------------------
+
+export type FaseTexpresso = 'apagado' | 'no_disponible' | 'iniciando' | 'listo' | 'caido';
+
+export interface VistaTexpresso {
+  fase: FaseTexpresso;
+  /** Por qué está caído o no disponible; prendido y listo, el primer error de TeX del documento. */
+  motivo: string | null;
+  distro: string | null;
+  /** Cuántas veces se reinició sola desde que se prendió. */
+  reinicios: number;
+  arranqueMs: number | null;
+  /** De mandar el último cambio a que TeXpresso lo mostró. */
+  ultimoMs: number | null;
+  errores: number;
+}
+
+export interface DisponibilidadTexpresso {
+  disponible: boolean;
+  motivo: string | null;
+  distro: string | null;
+  texpresso: string | null;
+  /** `false`: sólo se miró que haya WSL y una distro; TeXpresso se busca al prender el interruptor. */
+  completo: boolean;
+}
+
+export interface EstadoTexpresso {
+  vista: VistaTexpresso;
+  disponibilidad: DisponibilidadTexpresso;
+}
+
+export type EventoTexpresso =
+  | { type: 'estado'; vista: VistaTexpresso }
+  /** Clic en la ventana de TeXpresso: ir al código. */
+  | { type: 'sync'; rel: string; line: number }
+  /** TeXpresso mostró un cambio, `ms` después de mandárselo. */
+  | { type: 'actualizado'; ms: number; rel: string };
 
 export interface PartInfo {
   name: string;
@@ -181,7 +221,8 @@ export interface EtiquetaSim {
   context: string;
 }
 
-/** Un `ef` o una cita: el nombre al que apunta y dónde está. */
+/** Un `
+ef` o una cita: el nombre al que apunta y dónde está. */
 export interface UsoSim {
   name: string;
   command: string;
@@ -586,7 +627,7 @@ export interface LaunchOptions {
   root: string | null;
   smoke: boolean;
   /** Qué smoke de aceptación corre la interfaz con `LV_SMOKE`: el de F1, F2, F3 o F4. */
-  smokeMode: 'f1' | 'f2' | 'f3' | 'f4' | 'f5' | 'f6' | 'f7' | 'f8' | 'f8b' | 'f8c';
+  smokeMode: 'f1' | 'f2' | 'f3' | 'f4' | 'f5' | 'f6' | 'f7' | 'f8' | 'f8b' | 'f8c' | 'texpresso';
   smokeFile: string | null;
   /** Milisegundos que el smoke deja la interfaz abierta al terminar (para sacarle una captura). */
   smokePausaMs: number;
@@ -684,6 +725,17 @@ export interface Backend {
   exportParts(parts?: string[]): Promise<BuildAck>;
   /** Compila un fragmento con el documento de contexto; el PDF queda en `.lv/build/fragmento/lv-fragmento.pdf`. */
   previewFragment(text: string): Promise<BuildAck>;
+  /** La vista previa en vivo con TeXpresso: en qué fase está y si se puede prender. */
+  texpressoEstado(): Promise<EstadoTexpresso>;
+  /** Prender (mira adentro de la distro de WSL: puede tardar unos segundos) o apagar. */
+  texpressoActivar(on: boolean): Promise<EstadoTexpresso>;
+  /** El texto de un buffer del editor, sin guardar. Con TeXpresso apagado no hace nada. */
+  texpressoBuffer(rel: string, text: string): Promise<void>;
+  /** El archivo se cerró: TeXpresso vuelve a lo que hay en disco. */
+  texpressoCerrar(rel: string): Promise<void>;
+  /** El cursor está en `rel:line`: TeXpresso muestra esa página. */
+  texpressoPosicion(rel: string, line: number): Promise<void>;
+  onTexpresso(cb: (e: EventoTexpresso) => void): Promise<() => void>;
   /** Devuelve la función que deja de escuchar. */
   onBuildEvent(cb: (e: BuildEvent) => void): Promise<() => void>;
   /** Archivos del proyecto que cambiaron afuera de la app (no los que escribe la compilación), en ráfagas. */
@@ -695,4 +747,8 @@ export interface Backend {
   smokeReadBytes(rel: string): Promise<Uint8Array>;
   smokeMtime(rel: string): Promise<number>;
   writeSmokeResult(json: string): Promise<void>;
+  /** Sólo con `LV_SMOKE`: deja a TeXpresso sin responder (SIGSTOP), para ver que se lo reinicia. */
+  smokeTexpressoColgar?(): Promise<boolean>;
+  /** Sólo con `LV_SMOKE`: cuántos procesos de TeXpresso de la app hay en la distro. */
+  smokeTexpressoProcesos?(): Promise<number>;
 }

@@ -763,6 +763,26 @@ Aceptación: `scripts/aceptacion-f8c.ps1` (sobre `fixtures/imagenes`, con TeX re
 - [ ] `latexmkrc`: queda sólo lo propio del libro (`$makeindex` con `StyleInd.ist`, reglas custom); sale la elección de raíz, el registro, la cocción y `$out_dir`.
 - [ ] Actualizar `README.md` y `CLAUDE.md` del libro.
 
+### FT. Vista previa en vivo con TeXpresso (opcional, Latex Frog)
+
+Sale del spike `docs/spikes/texpresso-sin-fork.md` (Javier): no portar TeXpresso a Windows; si se quiere la vista previa en milisegundos, **TeXpresso en WSL2** (vía D), hablándole a su servidor en modo `-json` por `wsl.exe`. Decisión, arquitectura y mediciones en `docs/spikes/texpresso-wsl.md`. Reglas:
+
+- **Opcional y aparte.** Un interruptor en la barra (⚡ TeXpresso). Apagado, la app se comporta exactamente como antes: no lanza `wsl.exe` (salvo `wsl -l -v`, que no arranca la distro, para saber si el botón se puede usar), no escribe el driver de TeXpresso y compila con latexmk. Prendido, latexmk sigue igual (Ctrl+S, el panel PDF, la exportación y la publicación) y TeXpresso es sólo la vista previa.
+- **Lo que se entrega sale siempre de latexmk.** TeXpresso no escribe ningún archivo del proyecto (XDV, log y SyncTeX viven en su memoria); no se agrega nada que lo cambie sin preguntar.
+- **Cómo se ve: la ventana de TeXpresso al lado de la app** (WSLg), manejada por la app: el cursor la lleva a su página (`synctex-forward`), un clic en ella lleva al código (`synctex`) y la barra muestra sus errores. Ni imágenes ni XDV→PDF: las dos piden parchear el servidor de TeXpresso (ver el spike).
+- El interruptor es de la máquina (`State.texpresso` en `.lv/state.json`, con `texpressoDistro`/`texpressoBinario` opcionales), no de `latexviewer.json`. Si falta WSL, la distro, python3, TeXpresso, TeX Live o WSLg, queda «no disponible» con el motivo y el doctor lo informa: no se instala nada ni se le busca la vuelta.
+
+- [x] `lv-core::texpresso`: sondeo de WSL (liviano sin arrancar la distro, completo al prender), el puente (`texpresso/puente.py`: granja de enlaces, pings, matar el grupo al cerrar stdin) y el `Supervisor` (lanzar, buffers, posición, ping cada 4 s, cuelgue a los 6 s sin respuesta → reiniciar con los buffers, tope de 3 reinicios por minuto, apagar). Tests con un puente falso de PowerShell (`tests/texpresso.rs`) y con TeXpresso de verdad (`--features texpresso --test texpresso_wsl`).
+- [x] `session/texpresso`: el driver del perfil activo con las figuras sólo del cache (`external/mode=graphics if exists`, como S5), al día con el perfil, la selección y el capítulo actual; el interruptor en `state.json`; relanzar al abrir; el hallazgo del doctor.
+- [x] Tauri y `Backend`: `texpresso_estado|activar|buffer|cerrar|posicion` y los eventos `texpresso:estado|sync|actualizado`; en la interfaz, `store/texpresso.ts` (el botón, el texto con el EOL y el BOM del archivo y debounce de 60 ms, el cursor con 150 ms).
+- [x] Smoke `scripts/aceptacion-texpresso.ps1` con la app real sobre una copia del libro.
+
+Aceptación: con el interruptor apagado no hay procesos ni driver de TeXpresso; un clic lo prende y cada cambio tecleado (sin guardar) se ve en milisegundos; un cuelgue se detecta y se reinicia solo; latexmk compila igual con TeXpresso prendido; apagarlo o salir de la app no deja procesos en la distro; el interruptor guardado lo vuelve a lanzar al abrir.
+
+> **Resultado (`scripts/aceptacion-texpresso.ps1`, números en `docs/benchmarks.md`).** Pasa entero: clic → listo en **2,05 s**; cambios de a uno con **mediana 74 ms** (15/15) y una ráfaga al día **71 ms** después de la última tecla; cuelgue (SIGSTOP) caído a los 10,0 s y listo otra vez a los 12,9 s; latexmk 1,4 s con TeXpresso prendido; 0 procesos al apagar (107 ms) y al salir de la app (96 a 112 ms); con el interruptor guardado, listo 2,7 s después de abrir.
+>
+> **Lo que cambió respecto del spike, y se dice:** (1) **El «cuelgue al tercer cambio» del resumen no era un cuelgue**: TeXpresso compila sólo hasta la página que muestra, y el párrafo de la prueba estaba en la página siguiente. La app le manda la posición del cursor (y otra vez después de cada cambio, porque una vuelta atrás lo deja en la página 1). Los cuelgues de verdad se detectan igual, con un ping. (2) **El texto viaja con el EOL del archivo**: el libro de Javier es CRLF y el editor normaliza a LF; sin eso cada primer cambio volvía atrás hasta el principio. (3) **El driver no puede vivir en `.lv/drivers/`**: TeXpresso resuelve todo relativo a la carpeta del documento (y resuelve el enlace del documento); el puente arma una granja en Linux con enlaces a la raíz y una copia del driver. (4) **No se probó** el arranque con la distro apagada (suma ~2 s de arrancarla), la vista dentro del panel PDF ni Linux/macOS nativos.
+
 ### F10. Extras (cuando lo anterior esté firme)
 
 - [ ] Precompilar el preámbulo (`mylatexformat`) para el perfil parcial, con medición y fallback automático si falla. Es la optimización más grande que queda: el preámbulo del libro carga TikZ, biblatex y el template entero en cada pasada.
@@ -797,6 +817,7 @@ Aceptación: `scripts/aceptacion-f8c.ps1` (sobre `fixtures/imagenes`, con TeX re
 | `pdfjs-dist` 6.x declara Node ≥ 22.13 y la máquina de desarrollo tiene Node 20, que además terminó su soporte el 30/4/2026 | Pasar la máquina a Node 22 LTS y sacar `engine-strict=false` de `.npmrc`. En la revisión previa a F6, `npm ci`, los 177 tests y el typecheck pasaron con Node 22.23 |
 | SyncTeX impreciso en macros, tablas y flotantes | Refinamiento por texto y búsqueda en los archivos de la parte |
 | Hooks de LaTeX en distribuciones viejas | Versión mínima verificada por el doctor |
+| TeXpresso (FT) inmaduro o distinto del PDF real (xelatex en WSL contra pdflatex de MiKTeX) | Es opcional y sólo vista previa: lo que se entrega sale de latexmk; un cuelgue se detecta por ping y se reinicia, con tope de reinicios |
 | Antivirus de Windows frenando decenas de pdflatex en paralelo | Medir en F6; `parallelJobs` configurable |
 | Cancelar un build deja `.aux` corruptos | No se cancela por guardar; reparación automática (5.5) |
 

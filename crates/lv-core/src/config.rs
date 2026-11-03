@@ -490,6 +490,13 @@ pub struct State {
     /// La parte del último archivo guardado que pertenece a una: la que compila un perfil `parts: "current"`. Se guarda para que
     /// al volver a abrir el proyecto ese perfil siga compilando lo mismo.
     pub current_part: Option<String>,
+    /// La vista previa en vivo con TeXpresso (en WSL) prendida en esta máquina. Es de la máquina y no del proyecto: depende de que
+    /// haya WSL y TeXpresso instalados. Al abrir el proyecto, si está prendida, se vuelve a lanzar.
+    pub texpresso: bool,
+    /// La distro de WSL donde está TeXpresso (`None`: la por omisión que no sea de Docker) y la ruta del binario adentro (`None`: se
+    /// busca en el PATH, `~/.local/bin` y `~/texpresso/build`). No hay interfaz para cambiarlas: se editan en `.lv/state.json`.
+    pub texpresso_distro: Option<String>,
+    pub texpresso_binario: Option<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -505,6 +512,9 @@ impl Default for State {
             outside_save: OutsideSave::Warn,
             draft_images: false,
             current_part: None,
+            texpresso: false,
+            texpresso_distro: None,
+            texpresso_binario: None,
             extra: Map::new(),
         }
     }

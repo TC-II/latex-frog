@@ -49,6 +49,19 @@ La app guarda lo suyo en la carpeta `.lv/` del proyecto (si el proyecto es un re
    Con el cambio, `Menu.bat` sigue eligiendo el pie como hoy (lee `opciones.tex`) y la app lo elige con su menú.
 4. **`Menu.bat` y VS Code siguen funcionando mientras tanto.** No los uses a la vez que la app sobre la misma carpeta (escriben los mismos auxiliares). Los PDF de la app quedan en `.lv/build/<perfil>/`, no en `PDF/`; lo que se entrega sale de **Publicar** (menú de compilación), que copia el PDF del perfil `entrega` a `PDF/`.
 
+## Vista previa en vivo con TeXpresso (opcional)
+
+El botón **⚡ TeXpresso** de la barra prende una vista previa que se actualiza mientras escribís, en milisegundos y sin guardar: [TeXpresso](https://github.com/let-def/texpresso) corriendo en WSL, en su propia ventana al lado de la app. Es opcional: apagado, la app compila con latexmk como siempre, y aunque esté prendido lo que se publica y se exporta sale de latexmk. Compila con xelatex, así que puede verse un poco distinto del PDF real.
+
+Hace falta:
+
+- **WSL 2 con una distro de Linux** (Ubuntu): `wsl --install` desde una terminal de administrador, y reiniciar. La ventana usa WSLg, que viene con WSL en Windows 11.
+- Adentro de la distro: **python3**, **TeX Live** con xelatex (`sudo apt install texlive-xetex texlive-latex-extra texlive-lang-spanish`, y lo que pida el proyecto) y **TeXpresso** compilado: `git clone https://github.com/let-def/texpresso`, las dependencias de su README y `make`. La app lo busca en el `PATH`, en `~/.local/bin`, en `~/texpresso/build` y en `~/lv-prueba/texpresso/build`.
+
+Si falta algo, el botón queda en «no disponible» y, al pasar el mouse, dice qué falta; el Doctor también lo informa. La distro o la ruta de TeXpresso se pueden fijar en `.lv/state.json` del proyecto (`"texpressoDistro": "Ubuntu"`, `"texpressoBinario": "/ruta/a/texpresso"`).
+
+Con el botón prendido, mover el cursor lleva la ventana de TeXpresso a esa página (TeXpresso sólo compila hasta la página que muestra) y un clic en la ventana lleva al código. Queda prendido para ese proyecto en esta máquina hasta que lo apagues.
+
 ## Desinstalar
 
 Configuración › Aplicaciones › Latex Frog › Desinstalar. Los proyectos no se tocan (la carpeta `.lv/` de cada uno se puede borrar a mano).

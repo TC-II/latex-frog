@@ -100,7 +100,7 @@ impl Session {
 
     fn encolar_export(self: &Arc<Self>, job: ExportJob) -> Result<BuildAck> {
         // Un error de configuración se dice acá y no en un hilo: se arma el plan de la primera parte.
-        self.plan_con(&job.perfil, false, &PlanExtra { partes: Some(vec![job.partes[0].clone()]), fragmento: None })?;
+        self.plan_con(&job.perfil, false, &PlanExtra { partes: Some(vec![job.partes[0].clone()]), fragmento: None, ..Default::default() })?;
         match self.cola.pedir(Job::Export(job)) {
             Pedido::Correr(t) => match self.ejecutar(&t, false) {
                 Ok(id) => Ok(BuildAck::Started { id }),
@@ -123,7 +123,7 @@ impl Session {
         if texto.trim().is_empty() {
             return Err(otro("el fragmento está vacío"));
         }
-        self.plan_con(PERFIL_FRAGMENTO, false, &PlanExtra { partes: Some(vec![]), fragmento: Some(texto.clone()) })?;
+        self.plan_con(PERFIL_FRAGMENTO, false, &PlanExtra { partes: Some(vec![]), fragmento: Some(texto.clone()), ..Default::default() })?;
         match self.cola.pedir(Job::Fragment(FragmentJob { texto })) {
             Pedido::Correr(t) => match self.ejecutar(&t, false) {
                 Ok(id) => Ok(BuildAck::Started { id }),
@@ -142,7 +142,7 @@ impl Session {
     // --- correr ---------------------------------------------------------------------------------------------------------------
 
     pub(super) fn lanzar_fragmento(self: &Arc<Self>, f: &FragmentJob) -> Result<u64> {
-        let mut plan = self.plan_con(PERFIL_FRAGMENTO, false, &PlanExtra { partes: Some(vec![]), fragmento: Some(f.texto.clone()) })?;
+        let mut plan = self.plan_con(PERFIL_FRAGMENTO, false, &PlanExtra { partes: Some(vec![]), fragmento: Some(f.texto.clone()), ..Default::default() })?;
         // Con pdflatex, el preámbulo precompilado (`formato.rs`): se compila sólo `\begin{document}\end{document}` y el fragmento entra
         // por el hook guardado en el formato. Precompilar (unos segundos, sólo cuando cambia el preámbulo) va sin el candado de la sesión.
         if plan.spec.engine == "pdflatex" {
@@ -221,7 +221,7 @@ impl Session {
                     break;
                 }
                 let t_parte = std::time::Instant::now();
-                let extra = PlanExtra { partes: Some(vec![parte.clone()]), fragmento: None };
+                let extra = PlanExtra { partes: Some(vec![parte.clone()]), fragmento: None, ..Default::default() };
                 let (ok, num, archivo) = match self.build_de_servicio(perfil, &extra) {
                     Ok(BuildEvent::Finished { ok: true, pdf: Some(_), .. }) => {
                         let num = numero_impreso(&self.root, perfil, parte)

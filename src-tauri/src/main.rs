@@ -17,6 +17,7 @@ use lv_core::logparse::Problem;
 use lv_core::project::{self, DirEntry};
 use lv_core::search::{ReplaceReport, SearchOptions, SearchResult};
 use lv_core::symbols::Symbols;
+use lv_core::texpresso::{self, Disponibilidad, Evento as EventoTexpresso, Vista as VistaTexpresso};
 use lv_core::session::{BuildAck, FiguresStatus, FileInfo, Probada, ProjectView, Published, Session, SyncForward, SyncInverse, Validacion};
 use serde::Serialize;
 use std::path::PathBuf;
@@ -85,6 +86,7 @@ async fn launch_options() -> LaunchOptions {
             Some("f8") => "f8".into(),
             Some("f8b") => "f8b".into(),
             Some("f8c") => "f8c".into(),
+            Some("texpresso") => "texpresso".into(),
             _ => "f1".into(),
         },
         smoke_file: var("LV_SMOKE_FILE"),
@@ -171,6 +173,7 @@ async fn open_project(app: AppHandle, state: TauriState<'_, AppState>, path: Str
     // Si había un proyecto con un build en curso, se corta: sus eventos no tienen que mezclarse con los del nuevo.
     if let Some(vieja) = state.session.lock().unwrap().take() {
         vieja.cancel();
+        vieja.texpresso_apagar();
     }
     // Y se deja de observar la carpeta anterior antes de abrir la nueva.
     *state.observador.lock().unwrap() = None;
@@ -185,8 +188,87 @@ async fn open_project(app: AppHandle, state: TauriState<'_, AppState>, path: Str
         Ok(o) => *state.observador.lock().unwrap() = Some(o),
         Err(e) => eprintln!("no se pudo observar la carpeta: {e}"),
     }
+    // La vista previa con TeXpresso: sus eventos van a la interfaz y, si el interruptor quedó prendido en esta máquina, se vuelve a
+    // lanzar (en segundo plano: mirar adentro de la distro puede tardar si hay que arrancarla).
+    let aviso_tp = app.clone();
+    s.conectar_texpresso(Arc::new(move |e: EventoTexpresso| {
+        let _ = match &e {
+            EventoTexpresso::Estado { vista } => aviso_tp.emit("texpresso:estado", vista),
+            EventoTexpresso::Sync { .. } => aviso_tp.emit("texpresso:sync", &e),
+            EventoTexpresso::Actualizado { .. } => aviso_tp.emit("texpresso:actualizado", &e),
+        };
+    }));
+    let al_abrir = s.clone();
+    tauri::async_runtime::spawn_blocking(move || al_abrir.texpresso_al_abrir());
     *state.session.lock().unwrap() = Some(s);
     Ok(vista)
+}
+
+/// Lo que la barra necesita del interruptor de TeXpresso: en qué fase está y si se puede prender (y si no, por qué).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EstadoTexpresso {
+    vista: VistaTexpresso,
+    disponibilidad: Disponibilidad,
+}
+
+#[tauri::command]
+async fn texpresso_estado(state: TauriState<'_, AppState>) -> Res<EstadoTexpresso> {
+    let s = sesion(&state)?;
+    tauri::async_runtime::spawn_blocking(move || EstadoTexpresso { vista: s.texpresso_vista(), disponibilidad: s.texpresso_disponibilidad() })
+        .await
+        .map_err(|e| otro(&e.to_string()))
+}
+
+/// Prende o apaga la vista previa en vivo. Prender mira adentro de la distro de WSL: puede tardar unos segundos.
+#[tauri::command]
+async fn texpresso_activar(state: TauriState<'_, AppState>, on: bool) -> Res<EstadoTexpresso> {
+    let s = sesion(&state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let vista = s.texpresso_activar(on)?;
+        Ok(EstadoTexpresso { vista, disponibilidad: s.texpresso_disponibilidad() })
+    })
+    .await
+    .map_err(|e| otro(&e.to_string()))?
+    .map_err(|e: Error| e.info())
+}
+
+/// El texto de un buffer del editor (sin guardar). Con TeXpresso apagado no hace nada.
+#[tauri::command]
+async fn texpresso_buffer(state: TauriState<'_, AppState>, rel: String, text: String) -> Res<()> {
+    sesion(&state)?.texpresso_buffer(&rel, &text).map_err(|e| e.info())
+}
+
+#[tauri::command]
+async fn texpresso_cerrar(state: TauriState<'_, AppState>, rel: String) -> Res<()> {
+    sesion(&state)?.texpresso_cerrar(&rel);
+    Ok(())
+}
+
+/// El cursor está en `rel:line`: TeXpresso muestra esa página (y compila hasta ahí).
+#[tauri::command]
+async fn texpresso_posicion(state: TauriState<'_, AppState>, rel: String, line: u32) -> Res<()> {
+    sesion(&state)?.texpresso_posicion(&rel, line).map_err(|e| e.info())
+}
+
+/// Sólo para el smoke: deja a TeXpresso sin responder, para ver que se lo detecta y se lo reinicia.
+#[tauri::command]
+async fn smoke_texpresso_colgar(state: TauriState<'_, AppState>) -> Res<bool> {
+    solo_en_smoke()?;
+    Ok(sesion(&state)?.texpresso_simular_cuelgue())
+}
+
+/// Sólo para el smoke: cuántos procesos de TeXpresso de la app hay en la distro (`pgrep -fc lv-texpresso.tex`).
+#[tauri::command]
+async fn smoke_texpresso_procesos(state: TauriState<'_, AppState>) -> Res<u32> {
+    solo_en_smoke()?;
+    let s = sesion(&state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let distro = s.texpresso_vista().distro.or_else(|| s.texpresso_disponibilidad().distro).unwrap_or_else(|| "Ubuntu".into());
+        texpresso::contar_procesos(&distro)
+    })
+    .await
+    .map_err(|e| otro(&e.to_string()))
 }
 
 /// Exporta partes (por su nombre; ninguna o `None`: todas) a PDF sueltos con el número de capítulo impreso. Con otro trabajo en
@@ -512,6 +594,13 @@ fn main() {
             open_output_dir,
             export_parts,
             preview_fragment,
+            texpresso_estado,
+            texpresso_activar,
+            texpresso_buffer,
+            texpresso_cerrar,
+            texpresso_posicion,
+            smoke_texpresso_colgar,
+            smoke_texpresso_procesos,
         ])
         .build(tauri::generate_context!())
         .expect("error al crear la aplicación");
@@ -521,6 +610,8 @@ fn main() {
         if let RunEvent::Exit = evento {
             if let Some(s) = handle.state::<AppState>().session.lock().unwrap().as_ref() {
                 s.cancel();
+                // TeXpresso vive en WSL: sin esto quedaría corriendo hasta que el puente vea cerrado su stdin.
+                s.texpresso_apagar();
             }
         }
     });

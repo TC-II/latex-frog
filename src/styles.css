@@ -113,6 +113,12 @@ button, input, select { font: inherit; color: inherit; }
 .boton.peligro { border-color: var(--peligro); color: var(--peligro); }
 .boton.chico { padding: 2px 8px; font-size: 12px; }
 .boton.activo { background: var(--acento-suave); border-color: var(--acento); }
+/* El interruptor de TeXpresso (vista previa en vivo en WSL): el color dice la fase. */
+.texpresso-boton.iniciando { border-color: var(--acento); color: var(--acento); }
+.texpresso-boton.listo { background: var(--acento-suave); border-color: var(--acento); color: var(--acento); }
+.texpresso-boton.listo.con-errores { border-color: var(--peligro); color: var(--peligro); }
+.texpresso-boton.caido { border-color: var(--peligro); color: var(--peligro); }
+.texpresso-boton.no_disponible { color: var(--texto-suave); }
 .icono-boton { background: none; border: none; cursor: pointer; padding: 2px 6px; border-radius: 4px; color: var(--texto-suave); }
 .icono-boton:hover:not(:disabled) { background: var(--hover); color: var(--texto); }
 .icono-boton:disabled { opacity: 0.4; cursor: default; }

@@ -23,3 +23,5 @@ tempfile = "3"
 [features]
 # Tests de integración que necesitan TeX instalado (latexmk, pdflatex): `cargo test -p lv-core --features tex`.
 tex = []
+# Tests con TeXpresso de verdad en WSL (`tests/texpresso_wsl.rs`): `cargo test -p lv-core --features texpresso --test texpresso_wsl`.
+texpresso = []

@@ -66,7 +66,9 @@ export default function App() {
         // El smoke de aceptación sólo se carga cuando se pide: no entra en el uso normal.
         if (opts.smoke && !smokeIniciado) {
           smokeIniciado = true;
-          void (opts.smokeMode === 'f8c'
+          void (opts.smokeMode === 'texpresso'
+            ? import('./smoke-texpresso').then((m) => m.correrSmokeTexpresso(opts))
+            : opts.smokeMode === 'f8c'
             ? import('./smoke-f8c').then((m) => m.correrSmokeF8c(opts))
             : opts.smokeMode === 'f8b'
             ? import('./smoke-f8b').then((m) => m.correrSmokeF8b(opts))
