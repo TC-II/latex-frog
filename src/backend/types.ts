@@ -117,6 +117,8 @@ export interface DisponibilidadTexpresso {
   texpresso: string | null;
   /** `false`: sólo se miró que haya WSL y una distro; TeXpresso se busca al prender el interruptor. */
   completo: boolean;
+  /** El TeXpresso de la distro tiene el parche de la pestaña «En vivo» (sólo se sabe con el sondeo completo). */
+  vivo: boolean;
 }
 
 export interface EstadoTexpresso {
@@ -129,7 +131,9 @@ export type EventoTexpresso =
   /** Clic en la ventana de TeXpresso: ir al código. */
   | { type: 'sync'; rel: string; line: number }
   /** TeXpresso mostró un cambio, `ms` después de mandárselo. */
-  | { type: 'actualizado'; ms: number; rel: string };
+  | { type: 'actualizado'; ms: number; rel: string }
+  /** La página que TeXpresso muestra, como imagen PNG en base64 (`pagina` desde 0). Sólo con la pestaña «En vivo» abierta. */
+  | { type: 'pagina'; pagina: number; paginas: number; ancho: number; alto: number; png: string };
 
 export interface PartInfo {
   name: string;
@@ -735,6 +739,12 @@ export interface Backend {
   texpressoCerrar(rel: string): Promise<void>;
   /** El cursor está en `rel:line`: TeXpresso muestra esa página. */
   texpressoPosicion(rel: string, line: number): Promise<void>;
+  /** Pestaña «En vivo»: prende (ancho en píxeles) o apaga (0) la imagen de la página que manda TeXpresso. */
+  texpressoVivo(ancho: number): Promise<void>;
+  /** Clic en la imagen (píxeles de la última imagen recibida): vuelve como un evento `sync`. */
+  texpressoVivoClic(x: number, y: number): Promise<void>;
+  /** ◀ ▶ de la pestaña «En vivo»: página anterior (< 0) o siguiente (> 0) de TeXpresso. */
+  texpressoPaginaVivo(delta: number): Promise<void>;
   onTexpresso(cb: (e: EventoTexpresso) => void): Promise<() => void>;
   /** Devuelve la función que deja de escuchar. */
   onBuildEvent(cb: (e: BuildEvent) => void): Promise<() => void>;

@@ -128,6 +128,22 @@ impl Session {
         Ok(())
     }
 
+    /// La pestaña «En vivo»: prende (`ancho` en píxeles) o apaga (0) la imagen de la página. Con el interruptor apagado sólo se anota
+    /// (no se lanza nada): al prenderlo, el supervisor se la pide a TeXpresso apenas arranca.
+    pub fn texpresso_vivo(&self, ancho: u32) {
+        self.texpresso.vivo(ancho.min(3000));
+    }
+
+    /// Clic en la imagen de la pestaña «En vivo» (píxeles de la imagen): vuelve como un `synctex` y la app abre el archivo.
+    pub fn texpresso_vivo_clic(&self, x: f32, y: f32) {
+        self.texpresso.vivo_clic(x, y);
+    }
+
+    /// ◀ ▶ de la pestaña «En vivo».
+    pub fn texpresso_pagina_vivo(&self, delta: i32) {
+        self.texpresso.pagina_vivo(delta);
+    }
+
     /// Sólo para el smoke: deja a TeXpresso sin responder (SIGSTOP) para ver que el supervisor lo detecta y lo reinicia.
     pub fn texpresso_simular_cuelgue(&self) -> bool {
         self.texpresso.simular_cuelgue()

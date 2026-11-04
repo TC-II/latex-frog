@@ -3,7 +3,7 @@ import type { DisponibilidadTexpresso, VistaTexpresso } from '../backend';
 import { boton, esFuenteTex } from './texpresso';
 
 const vista = (o: Partial<VistaTexpresso> = {}): VistaTexpresso => ({ fase: 'apagado', motivo: null, distro: 'Ubuntu', reinicios: 0, arranqueMs: null, ultimoMs: null, errores: 0, ...o });
-const disp = (o: Partial<DisponibilidadTexpresso> = {}): DisponibilidadTexpresso => ({ disponible: true, motivo: null, distro: 'Ubuntu', texpresso: null, completo: false, ...o });
+const disp = (o: Partial<DisponibilidadTexpresso> = {}): DisponibilidadTexpresso => ({ disponible: true, motivo: null, distro: 'Ubuntu', texpresso: null, completo: false, vivo: false, ...o });
 
 describe('el botón de TeXpresso', () => {
   it('apagado y disponible: se puede prender', () => {

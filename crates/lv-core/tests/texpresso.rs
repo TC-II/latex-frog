@@ -36,6 +36,10 @@ while ($true) {
     continue
   }
   if ($l -match '\["synctex-forward",\s*"([^"]+)",\s*(\d+)') { Decir ('["synctex", "' + $Matches[1] + '", ' + $Matches[2] + ', 0]') }
+  # La vista «En vivo»: con `live` > 0 manda una imagen (un PNG de mentira) y con `live-click` contesta con un synctex.
+  if ($l -match '\["live",\s*(\d+)') { if ([int]$Matches[1] -gt 0) { Decir ('["live-page", 2, 5, ' + $Matches[1] + ', 100, "iVBORw0KGgo="]') } else { Decir '["synctex", "apagada.tex", 1, 0]' }; continue }
+  if ($l -match '\["live-click",\s*([\d.]+),\s*([\d.]+)') { Decir '["synctex", "Secciones/A.tex", 7, 0]'; continue }
+  if ($l -match '\["next-page"\]') { Decir '["live-page", 3, 5, 800, 100, "iVBORw0KGgo="]'; continue }
 }
 "#;
 
@@ -82,6 +86,17 @@ impl Eventos {
                 Err(_) => panic!("no llegó el evento esperado en {segs} s; recibido: {:?}", Vec::<String>::new()),
             }
         }
+    }
+    /// Si en `ms` milisegundos llega algún evento que cumpla `f`.
+    fn llega(&self, ms: u64, f: impl Fn(&Evento) -> bool) -> bool {
+        let fin = Instant::now() + Duration::from_millis(ms);
+        let rx = self.rx.lock().unwrap();
+        while let Ok(ev) = rx.recv_timeout(fin.saturating_duration_since(Instant::now())) {
+            if f(&ev) {
+                return true;
+            }
+        }
+        false
     }
     fn fase(&self, segs: u64, fase: Fase) -> Vista {
         self.esperar(segs, |e| match e {
@@ -151,6 +166,52 @@ fn arranca_manda_los_buffers_y_mide_lo_que_tarda() {
     let texto = &r[0].1;
     assert_eq!(texto.matches("\"a.tex\",\"con un error\"").count(), 1, "{texto}");
     assert!(texto.contains("acción"), "el texto viaja en UTF-8: {texto}");
+    s.apagar();
+}
+
+fn pagina(e: &Evento) -> Option<(u32, u32, u32)> {
+    match e {
+        Evento::Pagina { pagina, paginas, ancho, png, .. } => {
+            assert_eq!(png, "iVBORw0KGgo=");
+            Some((*pagina, *paginas, *ancho))
+        }
+        _ => None,
+    }
+}
+
+#[test]
+fn la_imagen_en_vivo_se_pide_al_arrancar_se_reenvia_tras_un_cuelgue_y_el_clic_vuelve_como_sync() {
+    let d = TempDir::new().unwrap();
+    let s = Supervisor::nuevo(rapidas());
+    let ev = Eventos::nuevo(&s);
+    // Pedida antes de prender (la pestaña ya estaba abierta): se la pide apenas el puente dice hola, con el ancho anotado.
+    s.vivo(800);
+    s.encender(lanzamiento(d.path(), "normal"), None);
+    ev.fase(30, Fase::Listo);
+    assert_eq!(ev.esperar(10, pagina), (2, 5, 800));
+    // Un cambio de ancho (se movió la barra) se pide de nuevo; el mismo ancho no.
+    s.vivo(800);
+    s.vivo(1000);
+    assert_eq!(ev.esperar(10, pagina), (2, 5, 1000));
+    // ◀ ▶ y el clic llegan a TeXpresso; el clic vuelve como el `sync` de siempre.
+    s.pagina_vivo(1);
+    assert_eq!(ev.esperar(10, pagina), (3, 5, 800));
+    s.vivo_clic(120.5, 40.0);
+    let (rel, line) = ev.esperar(10, |e| match e {
+        Evento::Sync { rel, line } => Some((rel.clone(), *line)),
+        _ => None,
+    });
+    assert_eq!((rel.as_str(), line), ("Secciones/A.tex", 7));
+    // Tras un cuelgue y el reinicio, el puente nuevo vuelve a recibir el pedido de la imagen.
+    assert!(s.simular_cuelgue());
+    ev.fase(15, Fase::Caido);
+    ev.fase(30, Fase::Listo);
+    assert_eq!(ev.esperar(10, pagina), (2, 5, 1000));
+    // Apagada la pestaña, TeXpresso recibe el `live 0` (el falso lo confirma con un synctex de mentira) y el clic ya no viaja.
+    s.vivo(0);
+    ev.esperar(10, |e| matches!(e, Evento::Sync { rel, .. } if rel == "apagada.tex").then_some(()));
+    s.vivo_clic(1.0, 1.0);
+    assert!(!ev.llega(800, |e| matches!(e, Evento::Sync { rel, .. } if rel == "Secciones/A.tex")), "el clic viajó con la pestaña apagada");
     s.apagar();
 }
 

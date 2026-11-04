@@ -51,6 +51,20 @@ export function boton(vista: VistaTexpresso | null, disp: DisponibilidadTexpress
   return { texto: '⚡ TeXpresso', clase: 'apagado', titulo: `${base}\nClic para prenderla.`, deshabilitado: !disp, prender: true };
 }
 
+/** La última página que TeXpresso mandó como imagen (pestaña «En vivo»). */
+export interface ImagenVivo {
+  /** Desde 0. */
+  pagina: number;
+  paginas: number;
+  /** Tamaño natural de la imagen, en píxeles: los clics se mandan en estas coordenadas. */
+  ancho: number;
+  alto: number;
+  /** `data:image/png;base64,...` */
+  src: string;
+  /** Cuántas imágenes llegaron desde que se prendió (el smoke espera a que suba). */
+  n: number;
+}
+
 interface TexpressoState {
   vista: VistaTexpresso | null;
   disp: DisponibilidadTexpresso | null;
@@ -58,6 +72,7 @@ interface TexpressoState {
   pidiendo: boolean;
   /** Los tiempos de los últimos cambios mostrados (para el smoke y el título). */
   tiempos: number[];
+  imagen: ImagenVivo | null;
   cargar(): Promise<void>;
   alternar(): Promise<void>;
   activar(on: boolean): Promise<void>;
@@ -68,8 +83,9 @@ export const useTexpresso = create<TexpressoState>()((set, get) => ({
   disp: null,
   pidiendo: false,
   tiempos: [],
+  imagen: null,
   async cargar() {
-    set({ vista: null, disp: null, pidiendo: false, tiempos: [] });
+    set({ vista: null, disp: null, pidiendo: false, tiempos: [], imagen: null });
     try {
       const e = await getBackend().texpressoEstado();
       set({ vista: e.vista, disp: e.disponibilidad });
@@ -118,19 +134,26 @@ export async function iniciarTexpresso(): Promise<void> {
   await useTexpresso.getState().cargar();
   try {
     desuscribir = await getBackend().onTexpresso((e: EventoTexpresso) => {
-      if (e.type === 'estado') useTexpresso.setState({ vista: e.vista });
-      else if (e.type === 'actualizado') useTexpresso.setState((s) => ({ tiempos: [...s.tiempos, e.ms].slice(-200) }));
+      if (e.type === 'estado') {
+        // Apagado, no queda la última página dibujada: la pestaña «En vivo» volvería a mostrar algo viejo al prenderlo.
+        useTexpresso.setState((s) => ({ vista: e.vista, imagen: e.vista.fase === 'apagado' || e.vista.fase === 'no_disponible' ? null : s.imagen }));
+      } else if (e.type === 'actualizado') useTexpresso.setState((s) => ({ tiempos: [...s.tiempos, e.ms].slice(-200) }));
       else if (e.type === 'sync') irAlCodigo(e.rel, e.line);
+      else if (e.type === 'pagina') {
+        useTexpresso.setState((s) => ({
+          imagen: { pagina: e.pagina, paginas: e.paginas, ancho: e.ancho, alto: e.alto, src: `data:image/png;base64,${e.png}`, n: (s.imagen?.n ?? 0) + 1 },
+        }));
+      }
     });
   } catch {
     // Un backend sin eventos de TeXpresso.
   }
 }
 
-const prendido = (): boolean => {
-  const f = useTexpresso.getState().vista?.fase;
-  return f === 'listo' || f === 'iniciando' || f === 'caido';
-};
+/** Si el interruptor está prendido (iniciando, listo o caído y reintentando). */
+export const estaPrendido = (v: VistaTexpresso | null): boolean => v?.fase === 'listo' || v?.fase === 'iniciando' || v?.fase === 'caido';
+
+const prendido = (): boolean => estaPrendido(useTexpresso.getState().vista);
 
 // Con debounce: cada tecla no tiene por qué cruzar a WSL (TeXpresso tarda 6 a 85 ms por cambio y los cambios seguidos se pisan).
 export const DEBOUNCE_TEXTO_MS = 60;

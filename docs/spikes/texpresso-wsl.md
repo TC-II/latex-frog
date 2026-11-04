@@ -18,7 +18,15 @@ TeXpresso produce XDV y lo dibuja con mupdf en su propia ventana (SDL2, por WSLg
 - **vista → código**: un clic en la ventana de TeXpresso emite `synctex` y la app abre el archivo en esa línea.
 - **errores**: la app rearma el buffer `out` de TeXpresso (la salida de TeX a la terminal) y la barra dice «⚡ TeXpresso: listo · 2 errores», con el primero en el título.
 
-Si algún día se quiere la vista adentro del panel, la vía es la primera (imágenes), con el parche al servidor: queda anotada y no se hizo.
+**Actualización (4 de noviembre de 2026): la vista adentro del panel PDF, con un parche chico a TeXpresso.** Se reabrió la decisión por pedido de Javier: la vía de las imágenes, pero sin pasar por XDV ni por otro render. El parche (`crates/lv-core/src/texpresso/parche/vista-en-vivo.patch`, ~190 líneas en `main.c`, `editor.c` y `editor.h`, contra `e8df770`) hace que TeXpresso, **además de dibujar en su ventana**, vuelva a dibujar la lista de dibujo de la página que ya armó el motor (`display_page`) en un pixmap del ancho pedido y la mande por stdout como `["live-page", pagina, paginas, ancho, alto, "<PNG en base64>"]`, sólo si la imagen cambió (hash de los píxeles; `display_page` corre en cada `RELOAD_EVENT`). Dos verbos nuevos en el protocolo `-json`: `["live", ancho]` (0 la apaga: apagada es el comportamiento de siempre) y `["live-click", x, y]` (un clic en píxeles de la imagen; contesta con el `synctex` que ya existía, por el mismo `synctex_scan` que usa un clic en la ventana). La app la muestra en la pestaña **⚡ En vivo** del panel PDF y sólo la pide mientras la pestaña está a la vista.
+
+- No se mantiene un fork: es un `.patch` versionado acá, que `aplicar.sh` aplica y compila en la distro (`git apply --check` antes de tocar nada; guarda el binario anterior). El puente informa si el binario tiene el parche (`sondear` → `vivo`); sin él, todo sigue andando con la ventana y la pestaña lo avisa.
+- No hay texto seleccionable ni búsqueda en esa vista, a propósito: el PDF de latexmk, en «Documento», ya lo cubre. Tampoco cambia lo que se entrega: sigue saliendo de latexmk.
+- **Limitaciones conocidas (las mismas que la ventana de TeXpresso, porque es su misma compilación):** TeXpresso compila el capítulo suelto, sin los `.aux` ni los `.bbl` de los demás. Las **referencias a otros capítulos salen como «??»** y las **citas con la clave cruda** en lugar del número; la numeración de capítulos y los índices tampoco son los del libro. Es xelatex y no pdflatex. Para ver eso bien, el PDF de latexmk. Se ve en la captura del smoke: «según el Procedimiento ??» y la cita `[butterworth1930]` con su clave.
+
+![La pestaña «En vivo» en el panel PDF, sobre una copia del libro](img/texpresso-en-vivo.png)
+
+*Captura de `scripts/aceptacion-texpresso.ps1 -Captura`: el contenido del WebView2 pedido por el protocolo de depuración, no una captura de la pantalla. El texto «vista en vivo ok rapidoabcdef…» es lo que el smoke tecleó sin guardar.*
 
 ## Cómo está armado
 
@@ -88,7 +96,7 @@ Los procesos de TeXpresso en la distro mientras está prendido: 21 a 25 (el serv
 
 ## Lo que no se hizo, y se dice
 
-- **La vista no está dentro del panel PDF** (ver la decisión). La ventana de TeXpresso se maneja como cualquier ventana de WSLg; no se probó `move-window` / `map-window` para pegarla sobre el panel (WSLg no siempre respeta la posición que pide una ventana).
+- **La ventana de TeXpresso no está pegada al panel.** Se maneja como cualquier ventana de WSLg; no se probó `move-window` / `map-window` para pegarla sobre el panel (WSLg no siempre respeta la posición que pide una ventana). Con el parche, la vista dentro del panel es la pestaña «En vivo» (ver la actualización arriba).
 - **xelatex no es pdflatex**: la vista previa puede diferir del PDF real (fuentes, `inputenc`, microtype). Sirve para escribir; lo que se mira para entregar es el PDF de latexmk, que sigue en su panel.
 - **Bibliografía e índice**: TeXpresso no corre biber ni makeindex; usa los `.bbl`/`.ind` que encuentre en la raíz del proyecto, si los hay.
 - **Archivos que no están abiertos**: TeXpresso los lee del disco al empezar; un archivo cambiado afuera mientras corre no se le avisa (no se manda `rescan`).

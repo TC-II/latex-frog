@@ -4,3 +4,6 @@ fixtures/** -text
 
 # Los .ps1 del repo llevan BOM UTF-8 (Windows PowerShell 5.1 los lee como ANSI sin él): que git no lo toque.
 *.ps1 -text
+
+# El parche de TeXpresso y el script que lo aplica corren en Linux (`git apply`, bash): tienen que quedar con LF.
+crates/lv-core/src/texpresso/parche/** -text

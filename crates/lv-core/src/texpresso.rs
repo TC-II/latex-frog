@@ -101,11 +101,14 @@ pub struct Disponibilidad {
     pub texpresso: Option<String>,
     /// `false`: sólo se miró que WSL y la distro existan (no se arrancó la distro); TeXpresso se busca al prender el interruptor.
     pub completo: bool,
+    /// Si el TeXpresso de la distro tiene el parche de la vista «En vivo» (`texpresso/parche/`): sin él la app sigue andando, con la
+    /// ventana de TeXpresso, y la pestaña «En vivo» avisa que falta el parche. Sólo se sabe con el sondeo completo.
+    pub vivo: bool,
 }
 
 impl Disponibilidad {
     pub fn no(motivo: impl Into<String>, distro: Option<String>) -> Self {
-        Disponibilidad { disponible: false, motivo: Some(motivo.into()), distro, texpresso: None, completo: true }
+        Disponibilidad { disponible: false, motivo: Some(motivo.into()), distro, texpresso: None, completo: true, vivo: false }
     }
 }
 
@@ -134,7 +137,7 @@ pub fn listar_distros() -> std::result::Result<Vec<Distro>, String> {
 /// Lo que se puede saber sin arrancar la distro: que exista WSL y una distro de Linux con WSL 2.
 pub fn sondeo_liviano(pedida: Option<&str>) -> Disponibilidad {
     match listar_distros().and_then(|ds| elegir_distro(&ds, pedida)) {
-        Ok(d) => Disponibilidad { disponible: true, motivo: None, distro: Some(d.nombre), texpresso: None, completo: false },
+        Ok(d) => Disponibilidad { disponible: true, motivo: None, distro: Some(d.nombre), texpresso: None, completo: false, vivo: false },
         Err(m) => Disponibilidad::no(m, None),
     }
 }
@@ -150,6 +153,9 @@ struct Sondeo {
     xelatex: Option<String>,
     #[serde(default)]
     pantalla: bool,
+    /// El TeXpresso tiene el parche de la vista «En vivo» (el binario conoce `live-page`).
+    #[serde(default)]
+    vivo: bool,
     /// Presente sólo si se preguntó por una raíz: `None` dentro es que no se ve desde Linux.
     #[serde(default, deserialize_with = "doble_opcion")]
     raiz: Option<Option<String>>,
@@ -197,7 +203,7 @@ pub fn interpretar_sondeo(json: &str, distro: &str) -> Disponibilidad {
     if let Some(None) = s.raiz {
         return Disponibilidad::no("la carpeta del proyecto no se ve desde Linux (wslpath no la encuentra)", d);
     }
-    Disponibilidad { disponible: true, motivo: None, distro: d, texpresso: Some(tp), completo: true }
+    Disponibilidad { disponible: true, motivo: None, distro: d, texpresso: Some(tp), completo: true, vivo: s.vivo }
 }
 
 /// La carpeta donde vive el puente (en el temporal de Windows) y lo deja escrito.
@@ -291,6 +297,8 @@ pub enum Mensaje {
     Flush,
     /// Clic en la ventana de TeXpresso: ir a `rel:line` en el editor.
     Synctex { rel: String, line: u32 },
+    /// La página que TeXpresso muestra, como imagen (parche «En vivo»): `pagina` desde 0, `png` en base64.
+    Pagina { pagina: u32, paginas: u32, ancho: u32, alto: u32, png: String },
 }
 
 pub fn interpretar(linea: &str) -> Option<Mensaje> {
@@ -310,6 +318,7 @@ pub fn interpretar(linea: &str) -> Option<Mensaje> {
         "truncate" if s(1) == Some("out") => Mensaje::Truncate(n(2)? as usize),
         "flush" => Mensaje::Flush,
         "synctex" => Mensaje::Synctex { rel: s(1)?.trim_start_matches("./").to_string(), line: n(2)?.max(1) as u32 },
+        "live-page" => Mensaje::Pagina { pagina: n(1)? as u32, paginas: n(2)? as u32, ancho: n(3)? as u32, alto: n(4)? as u32, png: s(5)?.to_string() },
         _ => return None,
     })
 }
@@ -410,6 +419,8 @@ pub enum Evento {
     Sync { rel: String, line: u32 },
     /// TeXpresso mostró un cambio: `ms` desde que se le mandó.
     Actualizado { ms: u64, rel: String },
+    /// La imagen de la página que muestra TeXpresso (pestaña «En vivo»): `png` en base64, `pagina` desde 0.
+    Pagina { pagina: u32, paginas: u32, ancho: u32, alto: u32, png: String },
 }
 
 pub type Aviso = Arc<dyn Fn(Evento) + Send + Sync>;
@@ -460,6 +471,8 @@ struct Interno {
     /// Lo que se le mandó de cada archivo (el texto del buffer): se vuelve a mandar después de un reinicio.
     buffers: BTreeMap<String, String>,
     posicion: Option<(String, u32)>,
+    /// Ancho en píxeles de la imagen de la página que se le pidió a TeXpresso (`live`); 0, apagada. Se vuelve a pedir tras un reinicio.
+    vivo: u32,
     ping_seq: u64,
     ping_pendiente: Option<(u64, Instant)>,
     ultimo_ping: Instant,
@@ -566,6 +579,7 @@ impl Supervisor {
             inicio: ahora,
             buffers: BTreeMap::new(),
             posicion: None,
+            vivo: 0,
             ping_seq: 0,
             ping_pendiente: None,
             ultimo_ping: ahora,
@@ -636,6 +650,7 @@ impl Supervisor {
             }
             st.encendido = false;
             st.soltar_proceso();
+            st.vivo = 0;
             st.gen += 1;
             st.fase = Fase::Apagado;
             st.motivo = None;
@@ -684,6 +699,36 @@ impl Supervisor {
         st.posicion = Some((rel.to_string(), line));
         if st.encendido && st.hola {
             st.mandar(serde_json::json!(["synctex-forward", rel, line]));
+        }
+    }
+
+    /// Prende (`ancho` > 0, en píxeles) o apaga (0) la imagen de la página que TeXpresso manda a la pestaña «En vivo». Sólo hace algo con
+    /// el parche en TeXpresso; sin él, TeXpresso contesta «unknown verb» por stderr y no pasa nada. Apagada mientras la pestaña no se ve:
+    /// dibujar y codificar la imagen le cuesta a TeXpresso tiempo que no hace falta gastar.
+    pub fn vivo(&self, ancho: u32) {
+        let mut st = self.inner.st.lock().unwrap();
+        if st.vivo == ancho {
+            return;
+        }
+        st.vivo = ancho;
+        if st.encendido && st.hola {
+            st.mandar(serde_json::json!(["live", ancho]));
+        }
+    }
+
+    /// Un clic en la imagen (píxeles de la última imagen mandada): TeXpresso contesta con el `synctex` de siempre.
+    pub fn vivo_clic(&self, x: f32, y: f32) {
+        let mut st = self.inner.st.lock().unwrap();
+        if st.encendido && st.hola && st.vivo > 0 {
+            st.mandar(serde_json::json!(["live-click", x, y]));
+        }
+    }
+
+    /// Pasa a la página anterior (`delta` < 0) o siguiente (> 0) de TeXpresso.
+    pub fn pagina_vivo(&self, delta: i32) {
+        let mut st = self.inner.st.lock().unwrap();
+        if st.encendido && st.hola {
+            st.mandar(serde_json::json!([if delta < 0 { "previous-page" } else { "next-page" }]));
         }
     }
 
@@ -796,6 +841,10 @@ fn leer(debil: Weak<Inner>, gen: u64, stdout: std::process::ChildStdout) {
                     if let Some((r, l)) = st.posicion.clone() {
                         st.mandar(serde_json::json!(["synctex-forward", r, l]));
                     }
+                    if st.vivo > 0 {
+                        let v = st.vivo;
+                        st.mandar(serde_json::json!(["live", v]));
+                    }
                     st.ping();
                 }
                 Mensaje::Pong(n) => {
@@ -828,6 +877,12 @@ fn leer(debil: Weak<Inner>, gen: u64, stdout: std::process::ChildStdout) {
                     cambio_estado = true;
                 }
                 Mensaje::Synctex { rel, line } => eventos.push(Evento::Sync { rel, line }),
+                Mensaje::Pagina { pagina, paginas, ancho, alto, png } => {
+                    // Una imagen que llega con la pestaña ya apagada (estaba en camino) no se muestra.
+                    if st.vivo > 0 {
+                        eventos.push(Evento::Pagina { pagina, paginas, ancho, alto, png });
+                    }
+                }
             }
         }
         for e in eventos {
@@ -969,6 +1024,9 @@ mod tests {
             assert!(!d.disponible, "{json}");
             assert!(d.motivo.as_deref().unwrap_or("").contains(espera), "{json}: {:?}", d.motivo);
         }
+        // El parche de la vista «En vivo» no es obligatorio: se informa aparte.
+        assert!(!d.vivo);
+        assert!(interpretar_sondeo(&bien.replace(r#""pantalla": true"#, r#""pantalla": true, "vivo": true"#), "Ubuntu").vivo);
         // Sin preguntar por la raíz, la clave no está y no cuenta.
         let sin_raiz = bien.replace(r#", "raiz": "/mnt/c/x""#, "");
         assert!(interpretar_sondeo(&sin_raiz, "Ubuntu").disponible);
@@ -984,6 +1042,11 @@ mod tests {
         assert_eq!(interpretar(r#"["flush"]"#), Some(Mensaje::Flush));
         assert_eq!(interpretar(r#"["synctex", "Secciones/A.tex", 56, 0]"#), Some(Mensaje::Synctex { rel: "Secciones/A.tex".into(), line: 56 }));
         assert_eq!(interpretar(r#"["lv-salio", 1, ["a", "b"]]"#), Some(Mensaje::Salio { codigo: 1, ultimas: vec!["a".into(), "b".into()] }));
+        assert_eq!(
+            interpretar(r#"["live-page", 2, 11, 800, 1036, "iVBORw0KGgo="]"#),
+            Some(Mensaje::Pagina { pagina: 2, paginas: 11, ancho: 800, alto: 1036, png: "iVBORw0KGgo=".into() })
+        );
+        assert_eq!(interpretar(r#"["live-page", 2]"#), None);
         assert_eq!(interpretar("basura"), None);
         assert_eq!(interpretar(r#"{"no": "lista"}"#), None);
     }
@@ -1011,7 +1074,7 @@ mod tests {
         assert_eq!(hallazgo(&no, false).nivel, Nivel::Info);
         assert_eq!(hallazgo(&no, true).nivel, Nivel::Aviso);
         assert!(hallazgo(&no, false).detalle.contains("TeX Live"));
-        let liviano = Disponibilidad { disponible: true, motivo: None, distro: Some("Ubuntu".into()), texpresso: None, completo: false };
+        let liviano = Disponibilidad { disponible: true, motivo: None, distro: Some("Ubuntu".into()), texpresso: None, completo: false, vivo: false };
         assert!(hallazgo(&liviano, false).titulo.contains("sin comprobar"));
         assert!(hallazgo(&liviano, false).arreglo.is_none());
     }

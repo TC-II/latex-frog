@@ -615,4 +615,16 @@ Misma máquina, WSL2 con Ubuntu 26.04 ya corriendo, TeXpresso `e8df770`. No es u
 | cuelgue simulado: caído / listo otra vez | 10,0 s / 12,9 s |
 | apagar o salir de la app → 0 procesos en la distro | 96 a 112 ms |
 
+**Con la pestaña «⚡ En vivo» abierta** (parche de TeXpresso; mismo smoke, misma máquina, 4 de noviembre de 2026; panel de 520 px de ancho, imagen de 520×736, 57 KB de PNG; una sola corrida completa del smoke con la pestaña, la segunda: la primera cortó en ▶, que estaba deshabilitado por el total de páginas, y midió 154 ms tecla→imagen y 87 ms de TeXpresso solo con la pestaña abierta):
+
+| | pestaña cerrada (`live 0`) | pestaña abierta |
+|---|---|---|
+| cambio de a uno, de `open` a la salida de TeXpresso (`ms` del supervisor) | mediana **81 ms** (máx. 207, 15/15; 74 ms en la corrida de la sección anterior, sin el parche) | mediana **82 ms** |
+| de la tecla a la imagen nueva en el store de la interfaz (incluye el debounce de 60 ms) | — | mediana **155 ms** (140 a 169 ms), 15/15 con imagen |
+| clic en ⚡ En vivo → primera imagen en el panel | — | 205 ms (220 ms en la corrida que cortó) |
+
+Con la pestaña abierta, además: ◀ ▶ cambian de página; un clic en la página llevó a `Secciones/Aproximación de Butterworth.tex:177`; tras el cuelgue simulado (caído a los 10,1 s, listo a los 13,4 s) la imagen siguió llegando; y salir de la app con la pestaña abierta (25 procesos de TeXpresso corriendo) dejó 0 procesos en la distro a los 156 ms.
+
+Lo que cuesta la imagen: en lo que mide el supervisor, nada que se distinga del ruido entre corridas (81, 82 y 87 ms); de la tecla a la imagen son los 60 ms del debounce, los ~82 ms de TeXpresso y ~13 ms de dibujar, hashear, codificar y cruzar `wsl.exe`. Probado aparte contra TeXpresso solo (documento de 2 páginas, ancho 800): primera imagen a los 280 ms de pedirla, cambios siguientes a 17 a 20 ms. No se midió con paneles más anchos que 520 px.
+
 **Dos arreglos que salieron del smoke, vistos en la traza del puente** (`LV_TEXPRESSO_TRAZA=1`, mismo escenario, una tecla cada 300 ms). Antes: el primer `open` difería del disco en el byte 78 (el editor mandaba LF a un capítulo CRLF), TeXpresso volvía atrás hasta antes de la página 1 («before rollback: 11 pages, after: 0») y, sin un destino de SyncTeX pendiente, se detenía en la página 1: los cambios siguientes, en la página ~10, no daban salida. Después (el texto con el EOL del archivo y la posición del cursor reenviada tras cada cambio): cada cambio vuelve atrás hasta el principio del capítulo y rehace hasta la página del cursor («output 11 pages long») en ~300 ms con esa cadencia. A una tecla cada 300 ms TeXpresso no llega a quedarse quieto entre teclas y da una sola salida al final: por eso el smoke mide los cambios de a uno (esperando cada salida) y la ráfaga desde la última tecla.

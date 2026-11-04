@@ -62,6 +62,18 @@ Si falta algo, el botón queda en «no disponible» y, al pasar el mouse, dice q
 
 Con el botón prendido, mover el cursor lleva la ventana de TeXpresso a esa página (TeXpresso sólo compila hasta la página que muestra) y un clic en la ventana lleva al código. Queda prendido para ese proyecto en esta máquina hasta que lo apagues.
 
+### La pestaña «⚡ En vivo» dentro del panel PDF (necesita un parche chico a TeXpresso)
+
+Con el botón prendido aparece, junto a «Documento», la pestaña **⚡ En vivo**: la misma página que TeXpresso dibuja en su ventana, pero dentro del panel PDF de la app, con ◀ ▶ y un clic en la página que lleva al código. Para eso TeXpresso tiene que mandar la imagen de la página (que ya renderiza con mupdf) por su protocolo: es un parche de ~190 líneas contra el commit `e8df770` de TeXpresso, en `crates/lv-core/src/texpresso/parche/`. Se aplica y se compila con (adentro de Ubuntu, o desde PowerShell con `wsl`):
+
+```bash
+wsl -d Ubuntu -e bash "/mnt/c/RUTA/A/latex-frog/crates/lv-core/src/texpresso/parche/aplicar.sh" ~/texpresso
+```
+
+(el último argumento es la carpeta del clon de TeXpresso; por omisión `~/lv-prueba/texpresso`). Guarda el binario anterior como `build/texpresso.sin-parche`. Sin el parche todo sigue andando con la ventana de TeXpresso y la pestaña avisa que falta. La imagen sólo se pide mientras la pestaña está a la vista. Es una vista **aproximada** (xelatex, sin texto seleccionable): el PDF de latexmk, en «Documento», sigue siendo lo que se entrega.
+
+**Limitaciones conocidas.** TeXpresso compila de a un archivo, sin los `.aux` ni los `.bbl` de los demás capítulos: las **referencias a otros capítulos salen como «??»** y las **citas salen con la clave cruda** (la clave de la entrada en lugar del número), igual que en su ventana. Lo mismo vale para la numeración de capítulos y los índices. Para ver eso bien, el PDF de latexmk.
+
 ## Desinstalar
 
 Configuración › Aplicaciones › Latex Frog › Desinstalar. Los proyectos no se tocan (la carpeta `.lv/` de cada uno se puede borrar a mano).

@@ -13,7 +13,7 @@
         dice por stderr (`unknown verb: lv-ping-N`), que es la prueba de que su bucle principal sigue leyendo. `lv-pausar` (sólo
         para el smoke) le manda SIGSTOP a TeXpresso para simular un cuelgue.
       - stdout (a la app): un JSON por línea. Los mensajes de TeXpresso que sirven (`append`/`truncate` del buffer `out`,
-        `flush`, `synctex`, `reset-sync`) y los del puente: `lv-hola` (arrancó), `lv-pong` (respondió un ping), `lv-error` (un
+        `flush`, `synctex`, `reset-sync` y, con el parche «En vivo», `live-page`: la página como PNG en base64) y los del puente: `lv-hola` (arrancó), `lv-pong` (respondió un ping), `lv-error` (un
         `[fatal]` de TeXpresso) y `lv-salio` (terminó, con las últimas líneas de su stderr).
       - stdin cerrado (la app apagó el interruptor, cerró el proyecto o murió): mata el grupo de procesos de TeXpresso y sale.
 
@@ -78,6 +78,17 @@ def path_de(tp):
     return os.path.dirname(tp) + ":/usr/local/bin:/usr/bin:/bin"
 
 
+def tiene_parche_vivo(tp):
+    """El TeXpresso es el que lleva el parche de la vista «En vivo» (`texpresso/parche/`): su binario conoce el mensaje `live-page`."""
+    if not tp:
+        return False
+    try:
+        with open(tp, "rb") as f:
+            return b"live-page" in f.read()
+    except OSError:
+        return False
+
+
 def sondear():
     tp = buscar_texpresso(arg("--texpresso"))
     env_path = path_de(tp) if tp else "/usr/local/bin:/usr/bin:/bin"
@@ -89,6 +100,7 @@ def sondear():
         "kpsewhich": which("kpsewhich"),
         "xelatex": which("xelatex"),
         "pantalla": bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")),
+        "vivo": tiene_parche_vivo(tp),
         "distro": None,
     }
     try:
@@ -229,8 +241,8 @@ def servir():
             v = m[0]
             if v in ("append", "truncate") and len(m) > 1 and m[1] != "out":
                 continue  # el buffer `log` repite al `out` con más ruido
-            if v in ("append", "truncate", "flush", "reset-sync"):
-                emitir(m)
+            if v in ("append", "truncate", "flush", "reset-sync", "live-page"):
+                emitir(m)  # `live-page`: la imagen de la página (parche «En vivo» de TeXpresso)
             elif v == "synctex" and len(m) >= 3:
                 emitir(["synctex", relativa(m[1])] + m[2:])
 

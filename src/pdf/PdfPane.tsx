@@ -10,6 +10,8 @@ import { useApp } from '../store/app';
 import { pdfActual, PdfViewerHost, type PdfEstado } from './viewer';
 import { pdfApi } from './api';
 import { VistaCapitulo, VistaFragmentoAprox } from './VistaAproximada';
+import { VistaVivo } from './VistaVivo';
+import { estaPrendido, useTexpresso } from '../store/texpresso';
 
 const VACIO: PdfEstado = { pagina: 0, paginas: 0, escala: 1, modo: 'ancho' };
 
@@ -33,6 +35,11 @@ export function PdfPane() {
   const vista = useApp((s) => s.vistaPdf);
   const mostrarVista = useApp((s) => s.mostrarVista);
   const fragmento = useApp((s) => s.fragmento);
+  // La pestaña «En vivo» existe mientras TeXpresso está prendido: al apagarlo, si se la estaba mirando, se vuelve al documento.
+  const tpPrendido = useTexpresso((s) => estaPrendido(s.vista));
+  useEffect(() => {
+    if (!tpPrendido && useApp.getState().vistaPdf === 'vivo') useApp.getState().mostrarVista('pdf');
+  }, [tpPrendido]);
 
   useEffect(() => {
     const host = new PdfViewerHost(areaRef.current!);
@@ -95,6 +102,7 @@ export function PdfPane() {
 
   const enFragmento = vista === 'fragmento';
   const enAproximada = vista === 'aproximada' || vista === 'fragmentoAprox';
+  const enVivo = vista === 'vivo';
   const estado = enFragmento ? estadoFrag : estadoDoc;
   useEffect(() => setPaginaTexto(estado.pagina ? String(estado.pagina) : ''), [estado.pagina]);
 
@@ -155,6 +163,17 @@ export function PdfPane() {
         >
           Fragmento aprox
         </button>
+        {tpPrendido && (
+          <button
+            role="tab"
+            aria-selected={enVivo}
+            className={`pdf-pestana pdf-pestana-vivo${enVivo ? ' activa' : ''}`}
+            onClick={() => mostrarVista('vivo')}
+            title="La página que TeXpresso ya tiene dibujada, mientras escribís (aproximada: lo que se entrega sale de latexmk). Clic en la página: al código."
+          >
+            ⚡ En vivo
+          </button>
+        )}
         {hayFragmento && (
           <button role="tab" aria-selected={enFragmento} className={`pdf-pestana${enFragmento ? ' activa' : ''}`} onClick={() => mostrarVista('fragmento')} title="Vista previa del fragmento (Ctrl+Alt+F)">
             Fragmento{fragmento.estado === 'compilando' ? ' …' : fragmento.estado === 'fail' ? ' ✘' : ''}
@@ -163,7 +182,8 @@ export function PdfPane() {
       </div>
       {vista === 'aproximada' && <VistaCapitulo />}
       {vista === 'fragmentoAprox' && <VistaFragmentoAprox />}
-      <div className="pdf-barra" style={enAproximada ? { display: 'none' } : undefined}>
+      {enVivo && <VistaVivo />}
+      <div className="pdf-barra" style={enAproximada || enVivo ? { display: 'none' } : undefined}>
         <button className="icono-boton" disabled={!hayPdf} onClick={() => h?.anterior()} title="Página anterior">◀</button>
         <input
           className="pagina"

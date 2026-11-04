@@ -11,9 +11,13 @@
 # tibio) y WSL2 con TeXpresso, TeX Live y WSLg (la ventana de TeXpresso aparece unos segundos). Trabaja sobre una copia en
 # spikes\work\texpresso-smoke\ (ignorada por git). Sale con 0 si todo dio ok.
 
+# -Captura: además, saca una captura del panel PDF con la pestaña «En vivo» a la vista (docs\spikes\img\texpresso-en-vivo.png), por el
+# protocolo de depuración del WebView2 (scripts\capturar-webview.mjs): no toca la pantalla ni el mouse. Necesita Node.
 param(
     [int]$LimiteMin = 15,
-    [string]$Distro = ''
+    [string]$Distro = '',
+    [switch]$Captura,
+    [int]$PuertoCdp = 9333
 )
 
 $ErrorActionPreference = 'Stop'
@@ -66,6 +70,16 @@ function Correr([string]$archivo) {
     $env:LV_SMOKE = 'texpresso'
     if ($archivo) { $env:LV_SMOKE_FILE = $archivo } else { Remove-Item Env:LV_SMOKE_FILE -ErrorAction SilentlyContinue }
     if (Test-Path $salida) { Remove-Item $salida }
+    # La captura del panel, sólo en la primera corrida: el smoke la espera si ve LV_SMOKE_PAUSA_MS (acá, sólo una marca) y el
+    # capturador (Node) la saca por el puerto de depuración del WebView2.
+    $capturador = $null
+    if ($Captura -and -not $archivo) {
+        $imagen = Join-Path $repo 'docs\spikes\img\texpresso-en-vivo.png'
+        New-Item -ItemType Directory -Force (Split-Path $imagen) | Out-Null
+        $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$PuertoCdp --remote-allow-origins=*"
+        $env:LV_SMOKE_PAUSA_MS = '1'
+        $capturador = Start-Process -FilePath 'node' -ArgumentList @("`"$(Join-Path $PSScriptRoot 'capturar-webview.mjs')`"", $PuertoCdp, "`"$imagen`"", ($LimiteMin * 60)) -PassThru -NoNewWindow
+    }
     $t = Get-Date
     $p = Start-Process -FilePath $exe -PassThru
     $limite = (Get-Date).AddMinutes($LimiteMin)
@@ -73,6 +87,12 @@ function Correr([string]$archivo) {
     if (-not $p.HasExited) {
         cmd /c "taskkill /PID $($p.Id) /T /F > NUL 2>&1"
         Write-Host "TOPE de $LimiteMin minutos: se cortó la app." -ForegroundColor Red
+    }
+    if ($capturador) {
+        if (-not $capturador.WaitForExit(20000)) { $capturador.Kill() }
+        Remove-Item Env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS -ErrorAction SilentlyContinue
+        Remove-Item Env:LV_SMOKE_PAUSA_MS -ErrorAction SilentlyContinue
+        if (Test-Path $imagen) { Write-Host "Captura del panel: $imagen" -ForegroundColor Green } else { Write-Host 'No se sacó la captura del panel.' -ForegroundColor Yellow }
     }
     $seg = [int]((Get-Date) - $t).TotalSeconds
     if (-not (Test-Path $salida)) { Write-Host "La app no dejó resultado ($salida)." -ForegroundColor Red; return $null }
@@ -112,7 +132,7 @@ $ok2 = ($r2 -ne $null) -and $r2.ok
 $limpio2 = Esperar-Sin-Procesos 'salir de la app (segunda corrida)'
 
 Write-Host ''
-if ($r1) { Write-Host ('medidas: ' + (($r1 | Select-Object prenderMs, arranqueMs, medianaMs, cambios, rafaga, detectarCuelgueMs, recuperarMs, buildMs, apagarMs | ConvertTo-Json -Compress -Depth 4))) }
+if ($r1) { Write-Host ('medidas: ' + (($r1 | Select-Object prenderMs, arranqueMs, medianaMs, cambios, rafaga, vivoPrimeraMs, vivoImagenPx, vivoImagenKB, vivoMedianaImagenMs, vivoMedianaTexpressoMs, vivoImagenMs, vivoClic, detectarCuelgueMs, recuperarMs, buildMs, apagarMs | ConvertTo-Json -Compress -Depth 4))) }
 if ($r2) { Write-Host ('reabrir: ' + (($r2 | Select-Object reabrirMs | ConvertTo-Json -Compress))) }
 if ($ok1 -and $ok2 -and $limpio1 -and $limpio2 -and $guardado) { Write-Host 'SMOKE OK' -ForegroundColor Green; exit 0 }
 $motivo = @($r1.fallo, $r2.fallo) | Where-Object { $_ }

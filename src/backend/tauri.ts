@@ -83,12 +83,16 @@ export const tauriBackend: Backend = {
   texpressoBuffer: (rel, text) => llamar('texpresso_buffer', { rel, text }),
   texpressoCerrar: (rel) => llamar('texpresso_cerrar', { rel }),
   texpressoPosicion: (rel, line) => llamar('texpresso_posicion', { rel, line }),
+  texpressoVivo: (ancho) => llamar('texpresso_vivo', { ancho }),
+  texpressoVivoClic: (x, y) => llamar('texpresso_vivo_clic', { x, y }),
+  texpressoPaginaVivo: (delta) => llamar('texpresso_pagina_vivo', { delta }),
   async onTexpresso(cb) {
-    // `texpresso:estado` lleva la vista sola; los otros dos ya vienen con su `type`.
+    // `texpresso:estado` lleva la vista sola; los otros ya vienen con su `type`.
     const d = await Promise.all([
       listen<VistaTexpresso>('texpresso:estado', (e) => cb({ type: 'estado', vista: e.payload })),
       listen<EventoTexpresso>('texpresso:sync', (e) => cb(e.payload)),
       listen<EventoTexpresso>('texpresso:actualizado', (e) => cb(e.payload)),
+      listen<EventoTexpresso>('texpresso:pagina', (e) => cb(e.payload)),
     ]);
     return () => d.forEach((f) => f());
   },

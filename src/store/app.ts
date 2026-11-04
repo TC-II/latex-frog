@@ -194,7 +194,7 @@ export interface ExportEstado {
 
 /** Qué se ve en el visor: el documento o la vista previa de un fragmento (8.2 del plan). */
 /** Dibujadas al instante, sin TeX (`vista/aproximada.ts`): `aproximada` es el archivo entero; `fragmentoAprox`, el párrafo del cursor. */
-export type VistaPdf = 'pdf' | 'fragmento' | 'aproximada' | 'fragmentoAprox';
+export type VistaPdf = 'pdf' | 'fragmento' | 'aproximada' | 'fragmentoAprox' | 'vivo';
 
 export interface FragmentoEstado {
   estado: 'idle' | 'compilando' | 'ok' | 'fail';

@@ -184,6 +184,92 @@ export async function correrSmokeTexpresso(opts: LaunchOptions): Promise<void> {
       return p;
     });
 
+    await paso('la pestaña «En vivo» muestra la página de TeXpresso dentro del panel PDF: se actualiza al teclear, ◀ ▶ y un clic lleva al código', async () => {
+      if (tp().disp?.vivo !== true) throw new Error('el TeXpresso de la distro no tiene el parche de la pestaña «En vivo» (crates/lv-core/src/texpresso/parche/aplicar.sh)');
+      const imgEnPanel = () => document.querySelector<HTMLImageElement>('.pdf-panel .vivo-imagen');
+      const n = () => tp().imagen?.n ?? 0;
+      const pestana = document.querySelector<HTMLButtonElement>('.pdf-panel .pdf-pestana-vivo');
+      if (!pestana) throw new Error('no está la pestaña «En vivo» con TeXpresso prendido');
+      const t0 = Date.now();
+      pestana.click();
+      await esperarHasta(() => store().vistaPdf === 'vivo', 5000, 'la pestaña «En vivo»');
+      await esperarHasta(() => tp().imagen !== null && imgEnPanel()?.complete === true && imgEnPanel()!.naturalWidth > 0, 20_000, 'la primera imagen en el panel');
+      datos.vivoPrimeraMs = Date.now() - t0;
+      const primera = tp().imagen!;
+      const el = imgEnPanel()!;
+      if (el.naturalWidth !== primera.ancho || el.naturalHeight !== primera.alto) throw new Error(`la imagen del panel es ${el.naturalWidth}×${el.naturalHeight} y TeXpresso mandó ${primera.ancho}×${primera.alto}`);
+      datos.vivoImagenPx = `${primera.ancho}×${primera.alto}`;
+      datos.vivoImagenKB = Math.round((primera.src.length * 3) / 4 / 1024);
+
+      // Tecleando letras (un espacio suelto no cambia lo dibujado): cuánto tarda la imagen nueva, de la tecla al store, y lo que mide TeXpresso solo.
+      const tiemposAntes = tp().tiempos.length;
+      const imagenes: number[] = [];
+      const antesSrc = tp().imagen!.src;
+      for (const c of 'abcdefghijklmno') {
+        const n0 = n();
+        escribirComoTecleado(c);
+        const t = Date.now();
+        while (n() === n0 && Date.now() - t < 3000) await dormir(5);
+        if (n() > n0) imagenes.push(Date.now() - t);
+        await dormir(100);
+      }
+      datos.vivoImagenMs = imagenes;
+      const medianaImagen = mediana(imagenes);
+      datos.vivoMedianaImagenMs = medianaImagen;
+      datos.vivoMedianaTexpressoMs = mediana(tp().tiempos.slice(tiemposAntes));
+      if (imagenes.length < 12) throw new Error(`sólo ${imagenes.length} de 15 cambios dieron una imagen nueva: ${imagenes.join(', ')}`);
+      if (tp().imagen!.src === antesSrc) throw new Error('la imagen no cambió al teclear');
+      if (medianaImagen > 1000) throw new Error(`mediana de la imagen ${medianaImagen} ms`);
+
+      // ◀ ▶: TeXpresso cambia de página y manda la imagen de esa.
+      const p0 = tp().imagen!.pagina;
+      const botones = [...document.querySelectorAll<HTMLButtonElement>('.pdf-panel .vivo-barra .icono-boton')];
+      const [ant, sig] = [botones[0], botones[1]];
+      if (!ant || !sig) throw new Error('no están ◀ ▶ en la pestaña');
+      sig.click();
+      await esperarHasta(() => tp().imagen!.pagina === p0 + 1, 15_000, 'la página siguiente');
+      ant.click();
+      await esperarHasta(() => tp().imagen!.pagina === p0, 15_000, 'la página anterior');
+
+      // Un clic en la página: TeXpresso resuelve el SyncTeX de su compilación y la app abre el archivo en esa línea. Se barre la página
+      // hasta dar con texto (un clic en el margen no lleva a ningún lado).
+      const syncs: { rel: string; line: number }[] = [];
+      const baja = await backend.onTexpresso((e) => {
+        if (e.type === 'sync') syncs.push({ rel: e.rel, line: e.line });
+      });
+      try {
+        const img = imgEnPanel()!;
+        const r = img.getBoundingClientRect();
+        let clics = 0;
+        for (const fy of [0.12, 0.2, 0.28, 0.36, 0.44, 0.52, 0.6, 0.68, 0.76, 0.84]) {
+          for (const fx of [0.3, 0.5, 0.7]) {
+            if (syncs.length > 0) break;
+            clics++;
+            img.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: r.left + r.width * fx, clientY: r.top + r.height * fy }));
+            await dormir(120);
+          }
+          if (syncs.length > 0) break;
+        }
+        if (syncs.length === 0) throw new Error(`${clics} clics sobre la página no dieron ningún salto al código`);
+        await esperarHasta(() => store().activeRel === syncs[0].rel, 5000, 'que la app abra el archivo del clic');
+        datos.vivoClic = { ...syncs[0], clics };
+      } finally {
+        baja();
+      }
+
+      // De vuelta al cursor, con la página del cursor a la vista, para la captura del panel (`scripts/aceptacion-texpresso.ps1 -Captura`).
+      await irAlParrafo();
+      await dormir(1500);
+      if (opts.smokePausaMs > 0) {
+        (window as unknown as { __capturaLista: boolean }).__capturaLista = true;
+        await esperarHasta(() => (window as unknown as { __capturaHecha?: boolean }).__capturaHecha === true, 25_000, 'la captura del panel').catch((e) => detalle(`sin captura: ${e.message}`));
+      }
+      const c = datos.vivoClic as { rel: string; line: number; clics: number };
+      detalle(
+        `primera imagen ${datos.vivoPrimeraMs} ms (${datos.vivoImagenPx}, ${datos.vivoImagenKB} KB); ${imagenes.length}/15 cambios con imagen, mediana tecla→imagen ${datos.vivoMedianaImagenMs} ms (${imagenes.join(', ')}), TeXpresso solo ${datos.vivoMedianaTexpressoMs} ms; ◀ ▶ ok; clic → ${c.rel}:${c.line} (${c.clics} clics)`,
+      );
+    });
+
     await paso('un error de TeX aparece en la barra y se va al corregirlo', async () => {
       const ahora = getDoc(CAPITULO)!.state.selection.main.head;
       escribirComoTecleado(' \\comandoQueNoExiste ');
@@ -212,7 +298,11 @@ export async function correrSmokeTexpresso(opts: LaunchOptions): Promise<void> {
       await dormir(800);
       const t = await teclear('!');
       if (t.length === 0) throw new Error('después del reinicio los cambios no llegan');
-      detalle(`caído a los ${datos.detectarCuelgueMs} ms («${motivo}»), listo otra vez a los ${datos.recuperarMs} ms; un cambio después: ${t.join(', ')} ms`);
+      // Con la pestaña «En vivo» abierta, el supervisor le vuelve a pedir la imagen al TeXpresso nuevo.
+      const antes = tp().imagen?.n ?? 0;
+      escribirComoTecleado('?');
+      await esperarHasta(() => (tp().imagen?.n ?? 0) > antes, 15_000, 'la imagen en vivo después del reinicio');
+      detalle(`caído a los ${datos.detectarCuelgueMs} ms («${motivo}»), listo otra vez a los ${datos.recuperarMs} ms; un cambio después: ${t.join(', ')} ms; la imagen en vivo sigue llegando`);
     });
 
     await paso('latexmk sigue compilando con TeXpresso prendido, y su driver no es el de TeXpresso', async () => {
@@ -244,10 +334,13 @@ export async function correrSmokeTexpresso(opts: LaunchOptions): Promise<void> {
       detalle(`sin procesos a los ${datos.apagarMs} ms`);
     });
 
-    await paso('se vuelve a prender y la app sale con TeXpresso corriendo (el script mira que no quede nada)', async () => {
+    await paso('se vuelve a prender con la pestaña «En vivo» y la app sale con TeXpresso corriendo (el script mira que no quede nada)', async () => {
       boton()!.click();
       await esperarHasta(() => fase() === 'listo', 120_000, 'listo otra vez');
-      detalle(`${await procesos()} procesos al salir`);
+      // Con la imagen en vivo pedida: la app sale con TeXpresso dibujando y codificando páginas.
+      document.querySelector<HTMLButtonElement>('.pdf-panel .pdf-pestana-vivo')?.click();
+      await esperarHasta(() => store().vistaPdf === 'vivo' && tp().imagen !== null, 30_000, 'la imagen en vivo después de volver a prender');
+      detalle(`${await procesos()} procesos al salir, con la pestaña «En vivo» abierta`);
     });
   })();
 

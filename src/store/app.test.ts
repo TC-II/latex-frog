@@ -328,6 +328,9 @@ function falso(archivos: Record<string, Partial<Archivo> & { text: string }>, pr
     texpressoBuffer: async (rel, text) => void llamadas.push(`tp buffer ${rel} ${JSON.stringify(text)}`),
     texpressoCerrar: async (rel) => void llamadas.push(`tp cerrar ${rel}`),
     texpressoPosicion: async (rel, line) => void llamadas.push(`tp posicion ${rel}:${line}`),
+    texpressoVivo: async (ancho) => void llamadas.push(`tp vivo ${ancho}`),
+    texpressoVivoClic: async (x, y) => void llamadas.push(`tp vivo-clic ${x},${y}`),
+    texpressoPaginaVivo: async (d) => void llamadas.push(`tp pagina ${d}`),
     onTexpresso: async (cb) => {
       control.emitirTexpresso = cb;
       return () => {};

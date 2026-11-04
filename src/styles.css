@@ -430,6 +430,13 @@ button, input, select { font: inherit; color: inherit; }
 .aprox-bloque { margin: 0 0 10px; padding: 2px 6px; border-left: 3px solid transparent; }
 .aprox-bloque.actual { border-left-color: #378ADD; background: rgba(55, 138, 221, 0.06); }
 .aprox-pie { font-size: 11px; color: var(--texto-suave); padding: 0 16px 12px; }
+
+/* Pestaña «En vivo»: la página de TeXpresso como imagen, al ancho del panel (la imagen se pide a ese ancho por la densidad de píxeles). */
+.vivo { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.vivo-area { flex: 1; min-height: 0; overflow: auto; background: var(--fondo); }
+.vivo-imagen { display: block; width: 100%; height: auto; background: #fff; cursor: crosshair; user-select: none; }
+.vivo-vacio { padding: 24px; text-align: center; color: var(--texto-suave); }
+.vivo-pagina, .vivo-estado { font-size: 12px; color: var(--texto-suave); }
 /* La marca fija de «Seguir»: la palabra del cursor, subrayada y sombreada, sin desvanecerse. */
 .lv-marca { position: absolute; background: rgba(55, 138, 221, 0.22); border-bottom: 2px solid rgba(55, 138, 221, 0.9); border-radius: 2px; }
 .lv-resaltado { position: absolute; background: rgba(255, 200, 0, 0.5); border-radius: 2px; box-shadow: 0 0 0 1px rgba(255, 170, 0, 0.8); animation: lv-desvanecer 1500ms ease-out forwards; }

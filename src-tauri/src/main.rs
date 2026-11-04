@@ -196,6 +196,7 @@ async fn open_project(app: AppHandle, state: TauriState<'_, AppState>, path: Str
             EventoTexpresso::Estado { vista } => aviso_tp.emit("texpresso:estado", vista),
             EventoTexpresso::Sync { .. } => aviso_tp.emit("texpresso:sync", &e),
             EventoTexpresso::Actualizado { .. } => aviso_tp.emit("texpresso:actualizado", &e),
+            EventoTexpresso::Pagina { .. } => aviso_tp.emit("texpresso:pagina", &e),
         };
     }));
     let al_abrir = s.clone();
@@ -249,6 +250,27 @@ async fn texpresso_cerrar(state: TauriState<'_, AppState>, rel: String) -> Res<(
 #[tauri::command]
 async fn texpresso_posicion(state: TauriState<'_, AppState>, rel: String, line: u32) -> Res<()> {
     sesion(&state)?.texpresso_posicion(&rel, line).map_err(|e| e.info())
+}
+
+/// La pestaña «En vivo» del panel PDF: prende (ancho en píxeles) o apaga (0) la imagen de la página que manda TeXpresso.
+#[tauri::command]
+async fn texpresso_vivo(state: TauriState<'_, AppState>, ancho: u32) -> Res<()> {
+    sesion(&state)?.texpresso_vivo(ancho);
+    Ok(())
+}
+
+/// Clic en la imagen de la pestaña «En vivo» (píxeles de la imagen): vuelve como un evento `texpresso:sync`.
+#[tauri::command]
+async fn texpresso_vivo_clic(state: TauriState<'_, AppState>, x: f32, y: f32) -> Res<()> {
+    sesion(&state)?.texpresso_vivo_clic(x, y);
+    Ok(())
+}
+
+/// ◀ ▶ de la pestaña «En vivo».
+#[tauri::command]
+async fn texpresso_pagina_vivo(state: TauriState<'_, AppState>, delta: i32) -> Res<()> {
+    sesion(&state)?.texpresso_pagina_vivo(delta);
+    Ok(())
 }
 
 /// Sólo para el smoke: deja a TeXpresso sin responder, para ver que se lo detecta y se lo reinicia.
@@ -599,6 +621,9 @@ fn main() {
             texpresso_buffer,
             texpresso_cerrar,
             texpresso_posicion,
+            texpresso_vivo,
+            texpresso_vivo_clic,
+            texpresso_pagina_vivo,
             smoke_texpresso_colgar,
             smoke_texpresso_procesos,
         ])
