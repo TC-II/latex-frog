@@ -3,7 +3,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { BackendError, type Backend, type BuildEvent, type ErrorKind, type LaunchOptions } from './types';
+import { BackendError, type Backend, type BuildEvent, type ErrorKind, type EventoTexpresso, type LaunchOptions, type VistaTexpresso } from './types';
 
 interface ErrorInfo {
   kind: ErrorKind;
@@ -30,7 +30,7 @@ export const tauriBackend: Backend = {
       open: string | null;
       root: string | null;
       smoke: boolean;
-      smoke_mode: 'f1' | 'f2' | 'f3' | 'f4' | 'f5' | 'f6' | 'f7' | 'f8' | 'f8b' | 'f8c';
+      smoke_mode: 'f1' | 'f2' | 'f3' | 'f4' | 'f5' | 'f6' | 'f7' | 'f8' | 'f8b' | 'f8c' | 'texpresso';
       smoke_file: string | null;
       smoke_pausa_ms: number;
     }>('launch_options');
@@ -78,6 +78,24 @@ export const tauriBackend: Backend = {
   openOutputDir: (cual) => llamar('open_output_dir', { cual }),
   exportParts: (parts) => llamar('export_parts', { parts: parts ?? null }),
   previewFragment: (text) => llamar('preview_fragment', { text }),
+  texpressoEstado: () => llamar('texpresso_estado'),
+  texpressoActivar: (on) => llamar('texpresso_activar', { on }),
+  texpressoBuffer: (rel, text) => llamar('texpresso_buffer', { rel, text }),
+  texpressoCerrar: (rel) => llamar('texpresso_cerrar', { rel }),
+  texpressoPosicion: (rel, line) => llamar('texpresso_posicion', { rel, line }),
+  texpressoVivo: (ancho) => llamar('texpresso_vivo', { ancho }),
+  texpressoVivoClic: (x, y) => llamar('texpresso_vivo_clic', { x, y }),
+  texpressoPaginaVivo: (delta) => llamar('texpresso_pagina_vivo', { delta }),
+  async onTexpresso(cb) {
+    // `texpresso:estado` lleva la vista sola; los otros ya vienen con su `type`.
+    const d = await Promise.all([
+      listen<VistaTexpresso>('texpresso:estado', (e) => cb({ type: 'estado', vista: e.payload })),
+      listen<EventoTexpresso>('texpresso:sync', (e) => cb(e.payload)),
+      listen<EventoTexpresso>('texpresso:actualizado', (e) => cb(e.payload)),
+      listen<EventoTexpresso>('texpresso:pagina', (e) => cb(e.payload)),
+    ]);
+    return () => d.forEach((f) => f());
+  },
   async onFsChanged(cb) {
     return listen<{ files: string[] }>('fs:changed', (e) => cb(e.payload.files));
   },
@@ -114,4 +132,6 @@ export const tauriBackend: Backend = {
   },
   smokeMtime: (rel) => llamar('smoke_mtime', { rel }),
   writeSmokeResult: (json) => llamar('write_smoke_result', { json }),
+  smokeTexpressoColgar: () => llamar('smoke_texpresso_colgar'),
+  smokeTexpressoProcesos: () => llamar('smoke_texpresso_procesos'),
 };

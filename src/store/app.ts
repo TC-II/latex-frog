@@ -50,6 +50,7 @@ import type { FiguraDeBuild, PasoDeBuild } from './barra';
 import { logBuffer } from './logbuffer';
 import { abrirPantallaProyecto, setAlGuardar } from './proyecto';
 import { FILTRO_INICIAL, listaDeProblemas, siguiente, visibles, type FiltroProblemas } from './problemas';
+import { iniciarTexpresso, setAlPrender, setIrAlCodigo, texpressoAlCerrar, texpressoAlEditar, texpressoAlMoverCursor, texpressoMandarYa } from './texpresso';
 
 export interface TabMeta {
   rel: string;
@@ -193,7 +194,7 @@ export interface ExportEstado {
 
 /** Qué se ve en el visor: el documento o la vista previa de un fragmento (8.2 del plan). */
 /** Dibujadas al instante, sin TeX (`vista/aproximada.ts`): `aproximada` es el archivo entero; `fragmentoAprox`, el párrafo del cursor. */
-export type VistaPdf = 'pdf' | 'fragmento' | 'aproximada' | 'fragmentoAprox';
+export type VistaPdf = 'pdf' | 'fragmento' | 'aproximada' | 'fragmentoAprox' | 'vivo';
 
 export interface FragmentoEstado {
   estado: 'idle' | 'compilando' | 'ok' | 'fail';
@@ -433,6 +434,13 @@ export const useApp = create<AppState>()((set, get) => {
   setDirtyListener((rel, dirty) => actualizarTab(rel, { dirty }));
   setEditListener((rel) => get().alEditar(rel));
   setSelectionListener((rel) => get().alMoverCursor(rel));
+  // TeXpresso: un clic en su ventana lleva al código; al prenderlo se le manda lo que el editor tiene sin guardar y dónde está el cursor.
+  setIrAlCodigo((rel, line) => void get().irAUbicacion(rel, line));
+  setAlPrender(() => {
+    const a = get().activeRel;
+    for (const t of get().tabs) if (t.dirty && t.rel !== a) texpressoMandarYa(t.rel);
+    if (a) texpressoMandarYa(a);
+  });
   setFuenteSimbolos(() => get().simbolos);
   setManejadorDefinicion(() => void get().irADefinicion());
   setManejadorDobleClic(() => void get().irAlPdf({ silencioso: true }));
@@ -514,6 +522,7 @@ export const useApp = create<AppState>()((set, get) => {
       }
       const info = await getBackend().openProject(path);
       cerrarTodos();
+      void iniciarTexpresso();
       if (temporizadorIdle) clearTimeout(temporizadorIdle);
       temporizadorIdle = null;
       set({
@@ -628,6 +637,7 @@ export const useApp = create<AppState>()((set, get) => {
     activar(rel) {
       if (getDoc(rel) || get().tabs.some((t) => t.rel === rel && t.visor)) {
         set({ activeRel: rel });
+        texpressoMandarYa(rel);
         void get().actualizarParteActiva();
       }
     },
@@ -658,6 +668,7 @@ export const useApp = create<AppState>()((set, get) => {
         }
       }
       cerrarDoc(rel);
+      texpressoAlCerrar(rel);
       set((s) => {
         const tabs = s.tabs.filter((t) => t.rel !== rel);
         let activeRel = s.activeRel;
@@ -730,6 +741,7 @@ export const useApp = create<AppState>()((set, get) => {
     // --- auto-compilación -------------------------------------------------------------------------------------------
 
     alEditar(rel) {
+      texpressoAlEditar(rel);
       if (get().vistaPdf === 'aproximada' || get().vistaPdf === 'fragmentoAprox') set((x) => ({ cursorEpoch: x.cursorEpoch + 1 }));
       const p = get().project;
       // Al dejar de tipear lo pide el perfil activo (`compileOn: idle`); el `state.autoCompile` de la máquina sigue valiendo (los tests
@@ -1711,6 +1723,7 @@ export const useApp = create<AppState>()((set, get) => {
     },
 
     alMoverCursor(rel) {
+      texpressoAlMoverCursor(rel);
       if (get().vistaPdf === 'aproximada' || get().vistaPdf === 'fragmentoAprox') set((x) => ({ cursorEpoch: x.cursorEpoch + 1 }));
       if (!get().seguir || rel !== get().activeRel) return;
       if (temporizadorSeguir) clearTimeout(temporizadorSeguir);

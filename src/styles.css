@@ -113,6 +113,12 @@ button, input, select { font: inherit; color: inherit; }
 .boton.peligro { border-color: var(--peligro); color: var(--peligro); }
 .boton.chico { padding: 2px 8px; font-size: 12px; }
 .boton.activo { background: var(--acento-suave); border-color: var(--acento); }
+/* El interruptor de TeXpresso (vista previa en vivo en WSL): el color dice la fase. */
+.texpresso-boton.iniciando { border-color: var(--acento); color: var(--acento); }
+.texpresso-boton.listo { background: var(--acento-suave); border-color: var(--acento); color: var(--acento); }
+.texpresso-boton.listo.con-errores { border-color: var(--peligro); color: var(--peligro); }
+.texpresso-boton.caido { border-color: var(--peligro); color: var(--peligro); }
+.texpresso-boton.no_disponible { color: var(--texto-suave); }
 .icono-boton { background: none; border: none; cursor: pointer; padding: 2px 6px; border-radius: 4px; color: var(--texto-suave); }
 .icono-boton:hover:not(:disabled) { background: var(--hover); color: var(--texto); }
 .icono-boton:disabled { opacity: 0.4; cursor: default; }
@@ -424,6 +430,13 @@ button, input, select { font: inherit; color: inherit; }
 .aprox-bloque { margin: 0 0 10px; padding: 2px 6px; border-left: 3px solid transparent; }
 .aprox-bloque.actual { border-left-color: #378ADD; background: rgba(55, 138, 221, 0.06); }
 .aprox-pie { font-size: 11px; color: var(--texto-suave); padding: 0 16px 12px; }
+
+/* Pestaña «En vivo»: la página de TeXpresso como imagen, al ancho del panel (la imagen se pide a ese ancho por la densidad de píxeles). */
+.vivo { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.vivo-area { flex: 1; min-height: 0; overflow: auto; background: var(--fondo); }
+.vivo-imagen { display: block; width: 100%; height: auto; background: #fff; cursor: crosshair; user-select: none; }
+.vivo-vacio { padding: 24px; text-align: center; color: var(--texto-suave); }
+.vivo-pagina, .vivo-estado { font-size: 12px; color: var(--texto-suave); }
 /* La marca fija de «Seguir»: la palabra del cursor, subrayada y sombreada, sin desvanecerse. */
 .lv-marca { position: absolute; background: rgba(55, 138, 221, 0.22); border-bottom: 2px solid rgba(55, 138, 221, 0.9); border-radius: 2px; }
 .lv-resaltado { position: absolute; background: rgba(255, 200, 0, 0.5); border-radius: 2px; box-shadow: 0 0 0 1px rgba(255, 170, 0, 0.8); animation: lv-desvanecer 1500ms ease-out forwards; }

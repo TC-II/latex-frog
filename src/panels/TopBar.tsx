@@ -8,6 +8,7 @@ import { abrirPantallaProyecto } from '../store/proyecto';
 import { textoDeProgreso } from '../store/figuras';
 import { resumen } from '../store/problemas';
 import { siguienteTema, textoDelTema, useTema } from '../store/tema';
+import { boton as botonTexpresso, useTexpresso } from '../store/texpresso';
 
 /** Los segundos que lleva el build (desde que se pidió) y, al lado, lo típico de ese perfil según el historial. */
 function Cronometro({ desde, tipico }: { desde: number | null; tipico: Tipico | undefined }) {
@@ -24,6 +25,27 @@ function Cronometro({ desde, tipico }: { desde: number | null; tipico: Tipico | 
     <>
       {seg.toFixed(0)} s{t && <span className="tipico"> ({t})</span>}
     </>
+  );
+}
+
+/** El interruptor de la vista previa con TeXpresso: apagado, iniciando, listo, caído o no disponible (con el motivo en el título). */
+function BotonTexpresso() {
+  const vista = useTexpresso((s) => s.vista);
+  const disp = useTexpresso((s) => s.disp);
+  const pidiendo = useTexpresso((s) => s.pidiendo);
+  const alternar = useTexpresso((s) => s.alternar);
+  const avisar = useApp((s) => s.avisar);
+  const b = botonTexpresso(vista, disp, pidiendo);
+  return (
+    <button
+      className={`boton texpresso-boton ${b.clase}`}
+      disabled={b.deshabilitado}
+      title={b.titulo}
+      aria-pressed={!b.prender}
+      onClick={() => void alternar().catch((e) => avisar(`TeXpresso: ${String(e)}`, 'error'))}
+    >
+      {b.texto}
+    </button>
   );
 }
 
@@ -130,6 +152,7 @@ export function TopBar() {
               >
                 Vista previa
               </button>
+              <BotonTexpresso />
             </>
           )}
           {(build.status === 'ok' || build.status === 'fail') && resumen(build.errors ?? 0, build.warnings ?? 0, 0) && (

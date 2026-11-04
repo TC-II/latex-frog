@@ -11,7 +11,19 @@ impl Session {
     /// Corre todos los chequeos (lanza `pdflatex`, `latexmk`, `perl`... por unos segundos; no cambia nada). No toma el candado de los
     /// datos mientras lanza procesos: una compilación en curso no se frena.
     pub fn doctor(&self) -> Result<Informe> {
-        self.doctor_con(&doctor::sonda_real)
+        // TeXpresso es opcional: con el interruptor apagado sólo se mira que haya WSL y una distro (sin arrancarla); prendido, lo que
+        // dio el sondeo completo al prenderlo. Corre a la vez que las sondas de TeX.
+        let encendido = self.texpresso.encendido();
+        let (informe, tp) = std::thread::scope(|sc| {
+            let h = sc.spawn(|| self.texpresso_disponibilidad());
+            (self.doctor_con(&doctor::sonda_real), h.join().ok())
+        });
+        let mut informe = informe?;
+        if let Some(d) = tp {
+            informe.hallazgos.push(crate::texpresso::hallazgo(&d, encendido));
+            doctor::ordenar(&mut informe.hallazgos);
+        }
+        Ok(informe)
     }
 
     pub fn doctor_con(&self, sonda: &doctor::Sonda) -> Result<Informe> {

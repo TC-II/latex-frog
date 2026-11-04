@@ -24,7 +24,11 @@ import {
   type Propuesta,
   type StatePatch,
   type Tipico,
+  type DisponibilidadTexpresso,
+  type EventoTexpresso,
+  type VistaTexpresso,
 } from '../backend';
+import { DEBOUNCE_CURSOR_MS, DEBOUNCE_TEXTO_MS, iniciarTexpresso, useTexpresso } from './texpresso';
 import { cerrarTodos, editarDoc, getDoc, moverCursor, textoDe } from '../editor/docs';
 import { BUILD_INICIAL, BUSQUEDA_INICIAL, FRAGMENTO_INICIAL, useApp } from './app';
 import { PROYECTO_INICIAL, useProyecto } from './proyecto';
@@ -164,6 +168,13 @@ function falso(archivos: Record<string, Partial<Archivo> & { text: string }>, pr
     /** Lo que `onBuildEvent` y `onFsChanged` le entregaron a la interfaz: los tests los disparan a mano. */
     emitirBuild: (() => {}) as (e: BuildEvent) => void,
     emitirCambios: (() => {}) as (archivos: string[]) => void,
+    /** TeXpresso: lo que contesta `texpressoActivar(true)` y lo que la interfaz recibe por `onTexpresso`. */
+    texpresso: {
+      vista: { fase: 'apagado', motivo: null, distro: null, reinicios: 0, arranqueMs: null, ultimoMs: null, errores: 0 } as VistaTexpresso,
+      disponibilidad: { disponible: true, motivo: null, distro: 'Ubuntu', texpresso: null, completo: false } as DisponibilidadTexpresso,
+      alPrender: { fase: 'iniciando', motivo: null, distro: 'Ubuntu', reinicios: 0, arranqueMs: null, ultimoMs: null, errores: 0 } as VistaTexpresso,
+    },
+    emitirTexpresso: (() => {}) as (e: EventoTexpresso) => void,
   };
   const vista = (o: Partial<ProjectInfo> = {}) => infoDe({ ...proyecto, state: { ...estado }, ...o });
   const b: Backend = {
@@ -308,6 +319,22 @@ function falso(archivos: Record<string, Partial<Archivo> & { text: string }>, pr
     smokeReadBytes: async () => new Uint8Array(),
     smokeMtime: async () => 0,
     writeSmokeResult: async () => {},
+    texpressoEstado: async () => ({ vista: control.texpresso.vista, disponibilidad: control.texpresso.disponibilidad }),
+    texpressoActivar: async (on) => {
+      llamadas.push(`tp activar ${on}`);
+      control.texpresso.vista = on ? control.texpresso.alPrender : { ...control.texpresso.vista, fase: 'apagado' };
+      return { vista: control.texpresso.vista, disponibilidad: control.texpresso.disponibilidad };
+    },
+    texpressoBuffer: async (rel, text) => void llamadas.push(`tp buffer ${rel} ${JSON.stringify(text)}`),
+    texpressoCerrar: async (rel) => void llamadas.push(`tp cerrar ${rel}`),
+    texpressoPosicion: async (rel, line) => void llamadas.push(`tp posicion ${rel}:${line}`),
+    texpressoVivo: async (ancho) => void llamadas.push(`tp vivo ${ancho}`),
+    texpressoVivoClic: async (x, y) => void llamadas.push(`tp vivo-clic ${x},${y}`),
+    texpressoPaginaVivo: async (d) => void llamadas.push(`tp pagina ${d}`),
+    onTexpresso: async (cb) => {
+      control.emitirTexpresso = cb;
+      return () => {};
+    },
   };
   setBackend(b);
   return { llamadas, disco, control, estado };
@@ -2081,5 +2108,84 @@ describe('historial, doctor y procesos (F8)', () => {
     expect(st().notice?.texto).toMatch(/otra instancia.*PID 777/);
     expect(st().dialog).toBeNull();
     expect(st().doctor).toBeNull();
+  });
+});
+
+describe('TeXpresso', () => {
+  const tp = (f: { llamadas: string[] }) => f.llamadas.filter((l) => l.startsWith('tp '));
+
+  it('apagado no le manda nada al editar ni al mover el cursor', async () => {
+    vi.useFakeTimers();
+    const f = falso({ 'a.tex': { text: 'uno\ndos\n' } });
+    await iniciarTexpresso();
+    await st().abrirArchivo('a.tex');
+    editarDoc('a.tex', { from: 0, insert: 'X' });
+    st().alEditar('a.tex');
+    st().alMoverCursor('a.tex');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(tp(f)).toEqual([]);
+  });
+
+  it('prendido manda el texto con debounce, el cursor y el cierre; un clic en su ventana lleva al código', async () => {
+    vi.useFakeTimers();
+    const f = falso({ 'a.tex': { text: 'uno\ndos\n' }, 'b.png': { text: '' } });
+    await iniciarTexpresso();
+    await st().abrirArchivo('a.tex');
+    editarDoc('a.tex', { from: 0, insert: 'X' });
+    await useTexpresso.getState().activar(true);
+    // Al prender se manda lo que el editor tiene sin guardar y dónde está el cursor.
+    expect(tp(f)).toEqual(['tp activar true', 'tp buffer a.tex "Xuno\\ndos\\n"', 'tp posicion a.tex:1']);
+    f.llamadas.length = 0;
+    // Tres teclas seguidas: un solo envío, con el último texto.
+    for (const c of ['a', 'b', 'c']) {
+      editarDoc('a.tex', { from: 0, insert: c });
+      st().alEditar('a.tex');
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_TEXTO_MS / 3);
+    }
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_TEXTO_MS);
+    expect(tp(f)).toEqual(['tp buffer a.tex "cbaXuno\\ndos\\n"']);
+    f.llamadas.length = 0;
+    moverCursor('a.tex', 9);
+    st().alMoverCursor('a.tex');
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_CURSOR_MS + 10);
+    expect(tp(f)).toEqual(['tp posicion a.tex:2']);
+    // Una imagen no se le manda.
+    f.llamadas.length = 0;
+    st().alEditar('b.png');
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_TEXTO_MS * 2);
+    expect(tp(f)).toEqual([]);
+    // Cerrar la pestaña (sin guardar) lo devuelve al disco.
+    vi.useRealTimers();
+    const cerrar = st().cerrarTab('a.tex');
+    await responder('descartar');
+    await cerrar;
+    expect(tp(f)).toContain('tp cerrar a.tex');
+    // Un clic en la ventana de TeXpresso abre el archivo en esa línea.
+    f.control.emitirTexpresso({ type: 'sync', rel: 'a.tex', line: 2 });
+    await vi.waitFor(() => expect(st().activeRel).toBe('a.tex'));
+    expect(st().activeRel).toBe('a.tex');
+    expect(st().irA).toMatchObject({ rel: 'a.tex', line: 2 });
+  });
+
+  it('el texto viaja con el EOL y el BOM del archivo (TeXpresso compara contra los bytes del disco)', async () => {
+    vi.useFakeTimers();
+    const f = falso({ 'crlf.tex': { text: 'uno\ndos\n', eol: 'crlf', bom: true } });
+    await iniciarTexpresso();
+    await st().abrirArchivo('crlf.tex');
+    await useTexpresso.getState().activar(true);
+    f.llamadas.length = 0;
+    editarDoc('crlf.tex', { from: 3, insert: '!' });
+    st().alEditar('crlf.tex');
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_TEXTO_MS * 2);
+    expect(tp(f)).toEqual([`tp buffer crlf.tex ${JSON.stringify('﻿uno!\r\ndos\r\n')}`]);
+  });
+
+  it('el estado que llega del core actualiza el botón, y lo mostrado se anota', async () => {
+    const f = falso({});
+    await iniciarTexpresso();
+    f.control.emitirTexpresso({ type: 'estado', vista: { ...f.control.texpresso.alPrender, fase: 'listo', ultimoMs: 12 } });
+    expect(useTexpresso.getState().vista?.fase).toBe('listo');
+    f.control.emitirTexpresso({ type: 'actualizado', ms: 15, rel: 'a.tex' });
+    expect(useTexpresso.getState().tiempos).toEqual([15]);
   });
 });

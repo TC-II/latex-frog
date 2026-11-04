@@ -39,6 +39,7 @@ mod diagnostico;
 mod export;
 mod historia;
 mod proyecto;
+mod texpresso;
 pub use proyecto::{ListadoProbado, Probada, Validacion};
 pub use bake::{Cocinando, ErrorFigura, FiglistView, FiguraView, FiguresStatus};
 
@@ -198,6 +199,10 @@ pub struct Session {
     /// Qué pidió el próximo build y qué se decidió del listado de figuras antes de él: lo consume `lanzar` y va al historial.
     motivo: Mutex<Option<String>>,
     listado_decidido: Mutex<Option<historial::Listado>>,
+    /// La vista previa en vivo con TeXpresso (`session/texpresso.rs`). Al soltar la sesión se apaga.
+    texpresso: crate::texpresso::Supervisor,
+    /// El último sondeo completo de TeXpresso (el que mira adentro de la distro).
+    texpresso_sondeo: Mutex<Option<crate::texpresso::Disponibilidad>>,
 }
 
 /// Un trabajo de la cola: un build, la cocción de figuras (F6), la exportación de partes y la vista previa de un fragmento (F7).
@@ -230,6 +235,8 @@ struct PlanExtra {
     partes: Option<Vec<String>>,
     /// El texto del fragmento: se escribe en `.lv/fragment/frag.tex` justo antes de compilar.
     fragmento: Option<String>,
+    /// El driver de TeXpresso (`session/texpresso.rs`): el del perfil, con las figuras sólo del cache (sin `-shell-escape`).
+    texpresso: bool,
 }
 
 fn es_de_servicio(perfil: &str) -> bool {
@@ -327,6 +334,8 @@ impl Session {
             bloqueado_por,
             motivo: Mutex::new(None),
             listado_decidido: Mutex::new(None),
+            texpresso: crate::texpresso::Supervisor::nuevo(Default::default()),
+            texpresso_sondeo: Mutex::new(None),
         };
         {
             let mut d = s.datos.lock().map_err(|_| otro("estado envenenado"))?;
@@ -523,6 +532,9 @@ impl Session {
         }
         let nuevo = d.state.clone();
         self.guardar_estado(&d);
+        drop(d);
+        // El perfil, la selección o las variables cambian lo que compila TeXpresso.
+        self.texpresso_al_dia();
         Ok(nuevo)
     }
 
@@ -572,6 +584,9 @@ impl Session {
             // La selección puede haber quedado con partes que ya no existen.
             self.recalcular(&mut d);
         }
+        drop(d);
+        // Con un perfil `current`, guardar en otro capítulo cambia lo que compila TeXpresso.
+        self.texpresso_al_dia();
         Ok(FileInfo { part, affects: affects.into(), profile_auto, parts_changed })
     }
 
@@ -649,7 +664,8 @@ impl Session {
             // (la exportación nunca va en borrador, ni aunque su perfil lo diga: es lo que se entrega)
             draft_images: perfil != config::PERFIL_EXPORT && (pc.draft_images || Self::borrador_para(&d.state, &cfg, perfil)),
             figuras,
-            solo_cache: pc.externalize && pc.cache_only,
+            // TeXpresso no tiene `-shell-escape`: consume el cache y dibuja en línea lo que falte, como el completo de S5.
+            solo_cache: pc.externalize && (pc.cache_only || extra.texpresso),
             fragmento: extra.fragmento.is_some(),
             omitir: pc.omit.iter().filter_map(|o| crate::piezas::Pieza::de_clave(o)).collect(),
             sustituciones,

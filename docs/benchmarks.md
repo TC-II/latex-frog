@@ -596,3 +596,35 @@ Copia del libro, perfil del capítulo actual, después de agregar un párrafo, c
 ### Preámbulo precompilado en los perfiles y una pasada mientras se escribe
 
 Mismo perfil y la misma copia, el ejemplo `build` en release, un párrafo nuevo antes de cada build. Antes, el build tras un cambio hacía 2 pasadas de ~2,1 s (4,2 s en la app). Con el preámbulo del perfil precompilado (`Session::preambulo_precompilado`: el driver hasta `\begin{document}` en un `.fmt`, y lo que sigue a esa línea de `libro_cuerpo.tex` copiado a `.lv/build/<perfil>/`): **2,2 s en total** por build con el formato hecho (manual, con todas las pasadas que pida latexmk); el primero, que precompila, 4,7 s. El PDF con y sin formato, del mismo estado: **20 páginas contra 20, 0 distintas** (`scripts/comparar-pdf.py`). Además, los builds que dispara guardar o un cambio de afuera hacen una sola pasada sin biber (lo que pide latexmk de más se completa en el siguiente); «Compilar» hace todas.
+## Vista previa en vivo con TeXpresso (rama `texpresso`, `docs/spikes/texpresso-wsl.md`)
+
+Misma máquina, WSL2 con Ubuntu 26.04 ya corriendo, TeXpresso `e8df770`. No es una optimización de latexmk: es otra vista previa, opcional, y latexmk no cambia (con el interruptor apagado la app no lanza nada nuevo; prendido, el build del perfil tardó 1,4 s, lo mismo que sin TeXpresso).
+
+**TeXpresso solo, sobre la copia del libro** (el capítulo actual con Butterworth, driver como el de la app): primer ciclo 1,23 a 1,52 s leyendo el proyecto por `/mnt/c` a través de la granja de enlaces, contra 1,62 s sobre una copia en el disco de Linux (spike); el primer cambio en la página a la vista 80 a 106 ms y los siguientes 14 a 19 ms; con la ventana llevada a la página 2, 63 a 69 ms; el ping (un verbo desconocido que contesta por stderr) 5 ms.
+
+**`tests/texpresso_wsl.rs`** (un artículo chico, ruta con tildes): arranque 0,48 a 0,52 s, 10 cambios con mediana 6 ms (máximo 33 ms; 11 ms y 26 ms con la posición del cursor reenviada después de cada cambio, el código final), apagar sin procesos en 106 ms.
+
+**Smoke `scripts/aceptacion-texpresso.ps1`**, dentro de la app sobre una copia del libro (capítulo en CRLF):
+
+| | |
+|---|---|
+| clic → listo | 2,05 s (primer ciclo 1,49 s) |
+| abrir con el interruptor guardado prendido → listo | 2,7 s |
+| cambio de a uno hasta la salida de TeXpresso | mediana 74 ms, máximo 321 ms (el primero), 15/15 |
+| ráfaga de 10 teclas cada 80 ms: de la última tecla a la vista al día | 71 ms |
+| cuelgue simulado: caído / listo otra vez | 10,0 s / 12,9 s |
+| apagar o salir de la app → 0 procesos en la distro | 96 a 112 ms |
+
+**Con la pestaña «⚡ En vivo» abierta** (parche de TeXpresso; mismo smoke, misma máquina, 4 de noviembre de 2026; panel de 520 px de ancho, imagen de 520×736, 57 KB de PNG; una sola corrida completa del smoke con la pestaña, la segunda: la primera cortó en ▶, que estaba deshabilitado por el total de páginas, y midió 154 ms tecla→imagen y 87 ms de TeXpresso solo con la pestaña abierta):
+
+| | pestaña cerrada (`live 0`) | pestaña abierta |
+|---|---|---|
+| cambio de a uno, de `open` a la salida de TeXpresso (`ms` del supervisor) | mediana **81 ms** (máx. 207, 15/15; 74 ms en la corrida de la sección anterior, sin el parche) | mediana **82 ms** |
+| de la tecla a la imagen nueva en el store de la interfaz (incluye el debounce de 60 ms) | — | mediana **155 ms** (140 a 169 ms), 15/15 con imagen |
+| clic en ⚡ En vivo → primera imagen en el panel | — | 205 ms (220 ms en la corrida que cortó) |
+
+Con la pestaña abierta, además: ◀ ▶ cambian de página; un clic en la página llevó a `Secciones/Aproximación de Butterworth.tex:177`; tras el cuelgue simulado (caído a los 10,1 s, listo a los 13,4 s) la imagen siguió llegando; y salir de la app con la pestaña abierta (25 procesos de TeXpresso corriendo) dejó 0 procesos en la distro a los 156 ms.
+
+Lo que cuesta la imagen: en lo que mide el supervisor, nada que se distinga del ruido entre corridas (81, 82 y 87 ms); de la tecla a la imagen son los 60 ms del debounce, los ~82 ms de TeXpresso y ~13 ms de dibujar, hashear, codificar y cruzar `wsl.exe`. Probado aparte contra TeXpresso solo (documento de 2 páginas, ancho 800): primera imagen a los 280 ms de pedirla, cambios siguientes a 17 a 20 ms. No se midió con paneles más anchos que 520 px.
+
+**Dos arreglos que salieron del smoke, vistos en la traza del puente** (`LV_TEXPRESSO_TRAZA=1`, mismo escenario, una tecla cada 300 ms). Antes: el primer `open` difería del disco en el byte 78 (el editor mandaba LF a un capítulo CRLF), TeXpresso volvía atrás hasta antes de la página 1 («before rollback: 11 pages, after: 0») y, sin un destino de SyncTeX pendiente, se detenía en la página 1: los cambios siguientes, en la página ~10, no daban salida. Después (el texto con el EOL del archivo y la posición del cursor reenviada tras cada cambio): cada cambio vuelve atrás hasta el principio del capítulo y rehace hasta la página del cursor («output 11 pages long») en ~300 ms con esa cadencia. A una tecla cada 300 ms TeXpresso no llega a quedarse quieto entre teclas y da una sola salida al final: por eso el smoke mide los cambios de a uno (esperando cada salida) y la ráfaga desde la última tecla.

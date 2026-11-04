@@ -47,6 +47,7 @@ La cifra que importa es la de `Private_Dirty`: entre un snapshot y el siguiente 
 Dos cosas que se vieron de paso:
 
 - **El tercer cambio seguido en el mismo lugar deja a TeXpresso sin responder**: el log llega a `changed offset is 2787` y no pone valla ni vuelve atrás. Pasó igual en las dos herramientas (`puente.py`, que dio «sin respuesta» desde el tercer cambio en `medidas.txt`, y `medir_procesos.py`). No se investigó; es un aviso sobre la madurez de TeXpresso, sea cual sea la plataforma.
+  > **Corrección (integración por WSL, `texpresso-wsl.md`): no es un cuelgue.** TeXpresso compila sólo hasta la página que muestra; el párrafo de la prueba está en la página 2 y la ventana mostraba la 1, así que a partir del tercer cambio el motor ya no había leído hasta ahí y no había nada que recompilar ni que decir. Con un `next-page` (o un `synctex-forward` a la línea editada) los cambios siguientes responden en 63 a 69 ms, y un ping por un verbo desconocido lo contesta en 5 ms en ese mismo estado.
 - En WSL quedó corriendo un TeXpresso de una prueba anterior (el `texpresso` de PID 587 y unos 33 `texpresso-xetex`, ~200 MB). No es de esta sesión y no se tocó; se mata con `pkill -f texpresso` dentro de Ubuntu.
 
 ## 2. Alternativas a `fork()` en Windows

@@ -27,3 +27,4 @@ pub mod search;
 pub mod session;
 pub mod symbols;
 pub mod synctex;
+pub mod texpresso;
